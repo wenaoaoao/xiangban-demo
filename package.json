@@ -1,0 +1,9 @@
+{
+  "name": "xiangban",
+  "version": "1.0.0",
+  "private": true,
+  "description": "巷伴：給想引進互助合作制度的據點使用的協助遊戲",
+  "dependencies": {
+    "@vercel/blob": "^2.8.2"
+  }
+}

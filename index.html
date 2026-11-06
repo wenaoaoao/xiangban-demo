@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#cfe9f5"><title>巷伴互助網站｜展示版</title><meta name="description" content="巷伴：給想引進互助合作制度的據點使用的協助遊戲（展示版）"><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8F%98%EF%B8%8F%3C/text%3E%3C/svg%3E"><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Huninn&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet"><style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui}img{max-width:100%}[hidden]{display:none!important}
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#cfe9f5"><title>巷伴互助網站</title><meta name="description" content="巷伴：給想引進互助合作制度的據點使用的協助遊戲"><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8F%98%EF%B8%8F%3C/text%3E%3C/svg%3E"><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Huninn&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet"><style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui}img{max-width:100%}[hidden]{display:none!important}
 /* 巷仔口小世界：單一日間風格（刻意不做深色），所有顏色都寫明 */
 :root{--bg:#f6efe0;--card:#fffaf0;--ink:#4a3a30;--mute:#85786c;--line:#e7dcc6;--pink:#ee6c7e;--pinkb:#fbd3d6;--yel:#f8c94e;--yelb:#fdeab0;--grn:#6bb07a;--grnb:#cfe8d0;--blu:#7fb2e5;--blub:#cfe3f6;--org:#f4a460;--wood:#c89a69;--woodd:#8a5e3b;--sky:#bfe6f5;--grass:#b8de98;--ui:#fff8e6;--u:1;color-scheme:light}
 body.fs1{--u:1.25}body.fs2{--u:1.5}
@@ -1348,8 +1348,7 @@ function buildPavilion3D(px,py){
  var el=fakeGroupEl(g);el.setCard=setPavilionCard;return el;
 }
 
-var MGR={salt:'ffeb7c84efaa6f3302b3da5765411ca5',hash:'867fb22db17ab12e90b9579d0ac84843e9a19108c00881ba4a74a9a593e9374c',iter:150000};
-
+var MGR=null;
 /* ============ 首次註冊 → 蓋房子 → 被拜訪 ============
    資料存放：
    - residents/<我的id>            公開的居民資料與房子（所有登入的人都看得到）
@@ -1360,6 +1359,35 @@ var MGR={salt:'ffeb7c84efaa6f3302b3da5765411ca5',hash:'867fb22db17ab12e90b9579d0
 var STANDALONE=!(window.claude&&window.claude.use);
 var DBX={db:null,user:null,uid:null,canWrite:true,ready:null,residents:{},houses:{},sub:false,saveT:0,saving:false,lastP:'',loaded:false};
 var LSK='xb_me_v1',REG=null,NOCLOSE=false,PLOTS=[];
+/* ---------- 正式版：連到 Vercel 後端（/api/app）。連不上就維持展示版 ---------- */
+var WEB=false,WEBWHY='',TOKK='xb_tok';
+DBX.token=null;DBX.webMe=null;DBX.polled=false;
+function tokGet(){try{return localStorage.getItem(TOKK)||''}catch(e){return''}}
+function tokSet(t){try{if(t)localStorage.setItem(TOKK,t);else localStorage.removeItem(TOKK)}catch(e){}}
+function apiCall(op,body,tok){
+ var t=tok===undefined?(DBX.token||admTok()):tok,ctl=window.AbortController?new AbortController():null,tm=setTimeout(function(){if(ctl)ctl.abort()},20000);
+ var hd={'Content-Type':'application/json'};if(t)hd.Authorization='Bearer '+t;
+ return fetch('/api/app?op='+op,{method:body===undefined?'GET':'POST',headers:hd,body:body===undefined?undefined:JSON.stringify(body),cache:'no-store',signal:ctl?ctl.signal:undefined}).then(function(r){
+  clearTimeout(tm);
+  return r.json().catch(function(){return{}}).then(function(j){if(!r.ok){var e=new Error(j.error||('http'+r.status));e.status=r.status;e.data=j;throw e}return j});
+ },function(e){clearTimeout(tm);throw e});
+}
+function probeWeb(){
+ return new Promise(function(ok){
+  if(!window.fetch||!/^https?:/.test(location.protocol)){ok(false);return}
+  var done=false;function fin(v){if(!done){done=true;ok(v)}}
+  setTimeout(function(){fin(false)},5000);
+  apiCall('health',undefined,'').then(function(j){
+   if(j&&j.storage&&j.storage.ok&&j.secretOk)fin(true);
+   else{WEBWHY=(j&&j.storage&&j.storage.error)||'';fin(false)}
+  },function(){fin(false)});
+ });
+}
+function webAuthFail(e){
+ if(!e||e.status!==401)return false;
+ if(DBX.token){tokSet('');DBX.token=null;toast('登入過期了，請重新登入');setTimeout(function(){location.reload()},1600);return true}
+ return false;
+}
 
 function lsGet(){try{var s=localStorage.getItem(LSK);return s?JSON.parse(s):{}}catch(e){return{}}}
 function lsSet(o){try{localStorage.setItem(LSK,JSON.stringify(o))}catch(e){}}
@@ -1372,22 +1400,32 @@ function claudeUse(name){
 }
 function initDB(){
  if(DBX.ready)return DBX.ready;
+ if(STANDALONE){
+  return DBX.ready=probeWeb().then(function(on){
+   if(!on)return null;
+   WEB=true;STANDALONE=false;
+   var t=tokGet();if(!t)return null;
+   return apiCall('me',{},t).then(function(j){DBX.token=t;DBX.uid=j.id;DBX.webMe=j}).catch(function(e){if(e.status===401||e.status===403)tokSet('')});
+  });
+ }
  return DBX.ready=Promise.all([claudeUse('db'),claudeUse('user')]).then(function(r){
   DBX.db=r[0];DBX.user=r[1];
   if(!DBX.user||!DBX.db)return null;
   return DBX.user.id().then(function(id){DBX.uid=id;return DBX.user.can('data.write')}).then(function(c){DBX.canWrite=(c!==false)}).catch(function(){});
  });
 }
-function dbOn(){return !!(DBX.db&&DBX.uid)}
+function dbOn(){return !!((DBX.db&&DBX.uid)||(WEB&&DBX.token&&DBX.uid))}
 function myId(){return DBX.uid||'me'}
 
 /* ---------- 讀寫我的資料 ---------- */
 function loadProfile(){
+ if(WEB)return Promise.resolve(DBX.webMe?DBX.webMe.profile:null);
  var local=lsGet().profile||null;
  if(!dbOn())return Promise.resolve(local);
  return DBX.db.doc('residents/'+DBX.uid).get().then(function(s){return s.exists?s.data():local}).catch(function(){return local});
 }
 function loadProgress(){
+ if(WEB)return Promise.resolve(DBX.webMe?DBX.webMe.progress:null);
  var local=lsGet().progress||null;
  if(!dbOn())return Promise.resolve(local);
  return DBX.db.doc('data/users/'+DBX.uid+'/progress').get().then(function(s){return s.exists?s.data():local}).catch(function(){return local});
@@ -1402,6 +1440,7 @@ function scheduleSave(){if(!S.reg||!DBX.loaded)return;clearTimeout(DBX.saveT);DB
 function saveProgress(){
  if(!S.reg||!DBX.loaded)return;
  var p=progressData(),js=JSON.stringify(p);if(js===DBX.lastP)return;DBX.lastP=js;
+ if(WEB){if(DBX.token&&!DBX.saving){DBX.saving=true;apiCall('save',{progress:p}).catch(function(e){DBX.lastP='';webAuthFail(e)}).then(function(){DBX.saving=false})}return}
  var l=lsGet();l.progress=p;lsSet(l);
  if(dbOn()&&DBX.canWrite&&!DBX.saving){DBX.saving=true;DBX.db.doc('data/users/'+DBX.uid+'/progress').set(p).catch(function(){}).then(function(){DBX.saving=false})}
 }
@@ -1410,7 +1449,17 @@ function applyProfile(p){
  if(p.av&&IMG[p.av]){S.av.id=p.av}
  applyAv();
 }
+function webSaveProfile(p){
+ if(!DBX.token){
+  var R=REG||{};
+  return apiCall('register',{name:p.name,pin:R.pin,slot:p.slot,slotMax:PLOTS.length,profile:p},'').then(function(j){
+   DBX.token=j.token;DBX.uid=j.id;tokSet(j.token);j.profile.id=j.id;applyProfile(j.profile);DBX.residents[j.id]=j.profile;setTimeout(webPoll,50);return true;
+  }).catch(function(e){return e&&e.data&&e.data.error==='nick'?'nick':false});
+ }
+ return apiCall('save',{profile:p}).then(function(j){var pr=j.profile||p;applyProfile(pr);DBX.residents[DBX.uid]=pr;return true}).catch(function(e){if(webAuthFail(e))return false;return e&&e.data&&e.data.error==='nick'?'nick':false});
+}
 function saveProfile(p){
+ if(WEB)return webSaveProfile(p);
  var l=lsGet();l.profile=p;lsSet(l);
  applyProfile(p);
  if(dbOn()&&DBX.canWrite){
@@ -1469,7 +1518,12 @@ function isMine(r){return r.id===myId()&&!r.demo}
 
 /* ---------- 房子長在村子裡 ---------- */
 var HOUSE_WALLS=['#fbe3d0','#dcebd2','#e3e0f5'],HOUSE_NAMES=['暖橘小屋','薄荷小屋','藤紫小屋'];
+function webPoll(){
+ var t=DBX.token||admTok();if(!t)return;
+ return apiCall('residents',{},t).then(function(j){var m={};(j.items||[]).forEach(function(r){m[r.id]=r});DBX.residents=m;DBX.polled=true;renderResidents()}).catch(function(e){webAuthFail(e)});
+}
 function subscribeResidents(){
+ if(WEB){if(DBX.sub)return;DBX.sub=true;webPoll();setInterval(function(){if(!document.hidden)webPoll()},25000);document.addEventListener('visibilitychange',function(){if(!document.hidden)webPoll()});return}
  if(!dbOn()||DBX.sub)return;DBX.sub=true;
  try{DBX.db.collection('residents').onSnapshot(function(snap){var m={};snap.docs.forEach(function(d){m[d.id]=d.data()});DBX.residents=m;renderResidents()},function(){})}catch(e){}
 }
@@ -1512,7 +1566,7 @@ function removeHouse(id){
 /* ---------- 註冊精靈 ---------- */
 function newReg(){
  var p=S.reg||{};
- return{name:p.name||'',job:p.job||'',skills:(p.skills||[]).slice(),wants:(p.wants||[]).slice(),about:p.about||'',time:p.time||'',av:p.av||S.av.id||'xiaoqi',style:p.style!=null?p.style:0,sign:p.sign||'',greet:p.greet||'歡迎來坐坐，一起聊聊天。',decor:p.decor||'flower',step:1,edit:!!S.reg};
+ return{name:p.name||'',job:p.job||'',skills:(p.skills||[]).slice(),wants:(p.wants||[]).slice(),about:p.about||'',time:p.time||'',av:p.av||S.av.id||'xiaoqi',style:p.style!=null?p.style:0,sign:p.sign||'',greet:p.greet||'歡迎來坐坐，一起聊聊天。',decor:p.decor||'flower',step:1,edit:!!S.reg,pin:'',pin2:'',agree:false,nickOK:''};
 }
 function openRegister(step){
  if(!REG||REG.done)REG=newReg();
@@ -1529,6 +1583,7 @@ function regHTML(){
  var R=REG,h=regHeader();
  if(R.step===1){
   h+='<label for="rgName">你的稱呼（大家怎麼叫你）</label><input id="rgName" maxlength="12" value="'+esc(R.name)+'" placeholder="例如：王阿嬤、小明" oninput="REG.name=this.value">';
+  if(WEB&&!R.edit)h+='<label for="rgPin">設一組 4 位數字密碼（下次回來要用，請記住）</label><input id="rgPin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" value="'+esc(R.pin)+'" placeholder="例如：2580（不要用生日）" oninput="REG.pin=this.value.replace(/\\D/g,\'\')"><label for="rgPin2">再輸入一次密碼</label><input id="rgPin2" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" value="'+esc(R.pin2)+'" placeholder="再打一次" oninput="REG.pin2=this.value.replace(/\\D/g,\'\')">';
   h+='<label>選一位像你的角色</label><div class="avg">'+AVS.map(function(a){return'<button type="button" class="avc'+(R.av===a[0]?' on':'')+'" onclick="regAv(\''+a[0]+'\')" aria-label="'+a[1]+'" aria-pressed="'+(R.av===a[0])+'"><img src="'+avImg(a[0])+'" alt=""><span>'+a[1]+'</span></button>'}).join('')+'</div>';
   h+='<div class="mf">'+(NOCLOSE?'<button type="button" class="btn ol" onclick="regSkip()">先逛逛，晚點再填</button>':'<button type="button" class="btn ol" onclick="closeModal()">取消</button>')+'<button type="button" class="btn" onclick="regNext()">下一步 ›</button></div>';
  }else if(R.step===2){
@@ -1545,6 +1600,7 @@ function regHTML(){
   h+='<label for="rgSign">門牌（掛在門上的字）</label><input id="rgSign" maxlength="10" value="'+esc(sign)+'" oninput="REG.sign=this.value;regPrevUp()">';
   h+='<label for="rgGreet">歡迎詞（客人一進來會看到）</label><input id="rgGreet" maxlength="30" value="'+esc(R.greet)+'" oninput="REG.greet=this.value">';
   h+='<label>門前的小東西</label><div class="chips" id="rgD">'+[['flower','🌼 小花園'],['tree','🌳 一棵小樹'],['none','都不要']].map(function(d){return'<button type="button" class="'+(R.decor===d[0]?'on':'')+'" onclick="regDecor(this,\''+d[0]+'\')">'+d[1]+'</button>'}).join('')+'</div>';
+  if(WEB&&!R.edit)h+='<label class="sw"><input type="checkbox" '+(R.agree?'checked':'')+' onchange="REG.agree=this.checked"> 我了解：我的稱呼、本事和房子，村裡的鄰居與據點管理者都看得到；我的密碼只有我自己知道。我可以隨時在口袋手機裡刪除我的資料。</label>';
   h+='<div class="mf"><button type="button" class="btn ol" onclick="regBack()">‹ 上一步</button><button type="button" class="btn pk" onclick="regFinish()">🏠 '+(R.edit?'改好了':'蓋好了，住進巷仔口')+'</button></div>';
  }
  return h;
@@ -1561,7 +1617,17 @@ function regTime(b,t){REG.time=t;[].forEach.call(document.querySelectorAll('#rgT
 function regDecor(b,d){REG.decor=d;[].forEach.call(document.querySelectorAll('#rgD button'),function(x){x.classList.toggle('on',x===b)});regPrevUp()}
 function regStyle(i){REG.style=i;modal(regHTML());if(NOCLOSE){var x=document.querySelector('#mbox .mx');if(x)x.style.display='none'}}
 function regNext(){
- if(REG.step===1){if(!REG.name.trim()){toast('先寫下你的稱呼，大家才知道怎麼叫你');var e=$('#rgName');if(e)e.focus();return}}
+ if(REG.step===1){if(!REG.name.trim()){toast('先寫下你的稱呼，大家才知道怎麼叫你');var e=$('#rgName');if(e)e.focus();return}
+  if(WEB&&!REG.edit){
+   if(!/^\d{4}$/.test(REG.pin||'')){toast('密碼是 4 個數字，例如 2580');var e1=$('#rgPin');if(e1)e1.focus();return}
+   if(REG.pin!==REG.pin2){toast('兩次密碼不一樣，請再輸入一次');var e2=$('#rgPin2');if(e2)e2.focus();return}
+   var nm=REG.name.trim();
+   if(REG.nickOK!==nm){
+    apiCall('nick',{name:nm},'').then(function(j){if(j.free){REG.nickOK=nm;regNext()}else toast('「'+nm+'」已經有人用了，請換一個稱呼（可以加上姓氏或數字）')}).catch(function(){toast('連不上伺服器，請稍後再試')});
+    return;
+   }
+  }
+ }
  if(REG.step===2){tagFlush('reg','skills');tagFlush('reg','wants');if(!REG.skills.length){toast('請至少寫下一件你會的事。每個人都有可以給別人的本事');var ti=$('#tgi_reg_skills');if(ti)ti.focus();return}if(!REG.sign)REG.sign=REG.name.trim()+'的家'}
  REG.step++;openRegister();
 }
@@ -1569,9 +1635,11 @@ function regBack(){if(REG.step>1){REG.step--;openRegister()}}
 function regSkip(){NOCLOSE=false;REG=null;closeModal();toast('好，先逛逛。之後在口袋手機裡，隨時可以蓋你的家');onboardDone(false)}
 function regFinish(){
  var R=REG;if(!R.name.trim()){R.step=1;openRegister();toast('先寫下你的稱呼');return}
+ if(WEB&&!R.edit&&!R.agree){toast('請先勾選「我了解」，才能蓋房子');return}
  var first=!R.edit,prof={name:R.name.trim().slice(0,12),job:(R.job||'').trim()||(R.skills[0]?R.skills[0]+'小幫手':''),skills:R.skills.slice(),wants:R.wants.slice(),about:(R.about||'').trim().slice(0,40),time:R.time||'都可以',av:R.av,style:R.style,sign:(R.sign||'').trim()||(R.name.trim()+'的家'),greet:(R.greet||'').trim()||'歡迎來坐坐。',decor:R.decor,slot:S.reg&&S.reg.slot!=null?S.reg.slot:pickSlot(),ts:S.reg&&S.reg.ts?S.reg.ts:Date.now()};
  R.done=true;
  saveProfile(prof).then(function(cloud){
+  if(WEB&&cloud!==true){R.done=false;if(cloud==='nick'){R.step=1;R.nickOK='';openRegister();toast('這個稱呼剛剛被別人用走了，請換一個')}else toast('連不上伺服器，資料還沒存好，請再按一次');return}
   DBX.loaded=true;NOCLOSE=false;closeModal();renderResidents();confetti();chime('win');
   var h=DBX.houses[myId()];if(h)look3D(h.x,h.y);
   toast(cloud?'🏠 你的家蓋好了，別人也看得到喔':'🏠 你的家蓋好了（目前只有你看得到）');
@@ -1621,6 +1689,10 @@ function msgsHTML(list){
 function localMsgs(id){var l=lsGet();return(l.msgs&&l.msgs[id])||[]}
 function loadMsgs(id){
  var r=findRes(id),el=$('#vmList');if(!el)return;
+ if(WEB&&dbOn()&&!(r&&r.demo)){
+  apiCall('msgs',{to:id}).then(function(j){var e2=$('#vmList');if(e2)e2.innerHTML=msgsHTML(j.items||[])}).catch(function(){var e3=$('#vmList');if(e3)e3.innerHTML='<p class="mp">暫時讀不到留言，請稍後再試。</p>'});
+  return;
+ }
  var loc=localMsgs(id).map(function(m){return{from:myId(),text:m.text,ts:m.ts,local:true}});
  if(!dbOn()||(r&&r.demo)){el.innerHTML=msgsHTML(loc.sort(function(a,b){return b.ts-a.ts}).slice(0,12));return}
  DBX.db.collection('messages').where('to','==',id).orderBy('ts','desc').limit(20).get().then(function(snap){
@@ -1631,6 +1703,10 @@ function loadMsgs(id){
 function visitSend(id){
  var inp=$('#vmMsg'),t=inp?inp.value.trim():'';if(!t){toast('先寫一句話再送出');return}
  var r=findRes(id),msg={to:id,from:myId(),text:t.slice(0,60),ts:Date.now()};
+ if(WEB&&dbOn()&&r&&!r.demo){
+  apiCall('say',{to:id,text:t}).then(function(){inp.value='';toast('✉️ 留言送出了');gain(5,{});loadMsgs(id)}).catch(function(e){if(webAuthFail(e))return;toast(e.status===429?'慢一點喔，隔幾秒再留言':'留言沒送出去，請再試一次')});
+  return;
+ }
  function localSave(){var l=lsGet();l.msgs=l.msgs||{};(l.msgs[id]=l.msgs[id]||[]).push({text:msg.text,ts:msg.ts});lsSet(l);inp.value='';loadMsgs(id)}
  if(dbOn()&&DBX.canWrite&&r&&!r.demo){
   DBX.db.collection('messages').add(msg).then(function(){inp.value='';toast('✉️ 留言送出了');gain(5,{});loadMsgs(id)}).catch(function(){DBX.canWrite=false;localSave();toast('目前是參觀身分，留言只有你看得到')});
@@ -1654,10 +1730,64 @@ function houseTick(cx,cz){
 function openChooser(){
  NOCLOSE=true;
  modal('<div class="mh"><span class="ic">👋</span><div><h3>歡迎來到巷伴小世界</h3><small>請選你的身分</small></div></div>'+
-  '<button type="button" class="rolebtn" onclick="REG=newReg();openRegister(1)"><b>🏠 我是居民</b><span>第一次來？先填資料、蓋一棟自己的房子</span></button>'+
-  '<button type="button" class="rolebtn mg" onclick="openMgrLogin(true)"><b>🔐 我是據點管理者</b><span>需要密碼，由計畫團隊提供</span></button>'+(STANDALONE?'<p class="mp" style="margin-top:8px">展示版：你填的資料只存在這部裝置，不會傳給別人。</p>':''));
+  '<button type="button" class="rolebtn" onclick="'+(WEB?'openResidentEntry()':'REG=newReg();openRegister(1)')+'"><b>🏠 我是居民</b><span>'+(WEB?'第一次來蓋房子，或輸入稱呼和密碼回家':'第一次來？先填資料、蓋一棟自己的房子')+'</span></button>'+
+  '<button type="button" class="rolebtn mg" onclick="openMgrLogin(true)"><b>🔐 我是據點管理者</b><span>需要密碼，由計畫團隊提供</span></button>'+(STANDALONE?'<p class="mp" style="margin-top:8px">展示版：你填的資料只存在這部裝置，不會傳給別人。'+(WEBWHY?'<br><small>（雲端資料庫還沒設定好：'+esc(WEBWHY)+'）</small>':'')+'</p>':''));
  var x=document.querySelector('#mbox .mx');if(x)x.style.display='none';
 }
+
+function openResidentEntry(){
+ NOCLOSE=true;
+ modal('<div class="mh"><span class="ic">🏠</span><div><h3>我是居民</h3><small>第一次來，還是已經有家了？</small></div></div>'+
+  '<button type="button" class="rolebtn" onclick="REG=newReg();openRegister(1)"><b>✨ 第一次來</b><span>填資料、設一組密碼、蓋一棟自己的房子</span></button>'+
+  '<button type="button" class="rolebtn" onclick="openLogin()"><b>🔑 我已經有家了</b><span>輸入稱呼和 4 位數字密碼，回到我的家</span></button>'+
+  '<div class="mf"><button type="button" class="btn ol" onclick="openChooser()">‹ 返回</button></div>');
+ var x=document.querySelector('#mbox .mx');if(x)x.style.display='none';
+}
+function openLogin(){
+ NOCLOSE=true;
+ modal('<div class="mh"><span class="ic">🔑</span><div><h3>回到我的家</h3><small>輸入你註冊時的稱呼和密碼</small></div></div>'+
+  '<label for="lgName">你的稱呼</label><input id="lgName" maxlength="12" autocomplete="username" placeholder="註冊時寫的稱呼">'+
+  '<label for="lgPin">4 位數字密碼</label><input id="lgPin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="current-password" placeholder="••••" onkeydown="if(event.key===\'Enter\')webLogin()">'+
+  '<p class="mp" id="lgMsg">忘記密碼？請找據點的工作人員幫你重設。</p>'+
+  '<div class="mf"><button type="button" class="btn ol" onclick="openResidentEntry()">‹ 返回</button><button type="button" class="btn" onclick="webLogin()">進去</button></div>');
+ var x=document.querySelector('#mbox .mx');if(x)x.style.display='none';
+ setTimeout(function(){var e=$('#lgName');if(e)e.focus()},60);
+}
+function webLogin(){
+ var n=$('#lgName'),p=$('#lgPin'),m=$('#lgMsg');if(!n||!p)return;
+ if(!n.value.trim()||!/^\d{4}$/.test(p.value)){m.style.color='#c0392b';m.textContent='請輸入稱呼和 4 位數字密碼';return}
+ m.style.color='';m.textContent='檢查中…';
+ apiCall('login',{name:n.value.trim(),pin:p.value},'').then(function(j){
+  DBX.token=j.token;DBX.uid=j.id;tokSet(j.token);DBX.webMe=j;
+  var prof=j.profile;applyProfile(prof);applyProgress(j.progress);DBX.loaded=true;S.introSeen=true;S.reg=prof;G.busy=false;NOCLOSE=false;closeModal();
+  DBX.residents[j.id]=prof;webPoll();renderResidents();
+  toast('歡迎回來，'+(prof.name||'')+'！');$('#hint').textContent='👆 點地面走路、拖曳畫面環顧，點頭上有 ❗ 的居民';$('#hint').classList.remove('off');
+  setTimeout(function(){var h=DBX.houses[myId()];if(h)look3D(h.x,h.y)},600);
+ }).catch(function(e){
+  var d=e.data||{};p.value='';m.style.color='#c0392b';
+  m.textContent=e.status===423?'輸錯太多次了，請 '+d.mins+' 分鐘後再試，或請工作人員幫你重設密碼。':e.status===401?'稱呼或密碼不對'+(d.left!=null&&d.left<5?'（還有 '+d.left+' 次機會）':'')+'。':'連不上伺服器，請稍後再試。';
+ });
+}
+/* ---------- 正式版帳號：登出、改密碼、刪除 ---------- */
+function webLogout(){tokSet('');DBX.token=null;try{localStorage.removeItem(LSK)}catch(e){}mgrSet(false);admTokSet('');location.reload()}
+function pinAsk(){
+ modal('<div class="mh"><span class="ic">🔑</span><div><h3>改密碼</h3><small>4 位數字</small></div></div>'+
+  '<label for="cpOld">現在的密碼</label><input id="cpOld" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="current-password">'+
+  '<label for="cpNew">新的密碼</label><input id="cpNew" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" onkeydown="if(event.key===\'Enter\')pinSave()">'+
+  '<p class="mp" id="cpMsg"></p><div class="mf"><button type="button" class="btn ol" onclick="closeModal()">取消</button><button type="button" class="btn" onclick="pinSave()">改好了</button></div>');
+}
+function pinSave(){
+ var o=$('#cpOld'),n=$('#cpNew'),m=$('#cpMsg');if(!o||!n)return;
+ if(!/^\d{4}$/.test(o.value)||!/^\d{4}$/.test(n.value)){m.style.color='#c0392b';m.textContent='兩個都要是 4 個數字';return}
+ apiCall('chpin',{pin:o.value,newPin:n.value}).then(function(){closeModal();toast('🔑 密碼改好了，下次用新密碼')}).catch(function(e){m.style.color='#c0392b';m.textContent=e.status===401?'現在的密碼不對':e.status===423?'輸錯太多次，請稍後再試':'沒改成功，請再試一次'});
+}
+function delAsk(){
+ modal('<div class="mh"><span class="ic">🗑</span><div><h3>刪除我的帳號？</h3><small>無法復原</small></div></div>'+
+  '<p class="mp">會刪掉：你的房子、你的進度、你的密碼。別人留給你的留言也會一起刪除。</p><p class="mp">刪除後，這個稱呼就可以被別人使用。</p>'+
+  '<div class="mf"><button type="button" class="btn ol" onclick="closeModal()">取消</button><button type="button" class="btn pk" onclick="delMe()">確定刪除</button></div>');
+}
+function delMe(){apiCall('delme',{}).then(function(){webLogout()}).catch(function(){toast('刪除失敗，請稍後再試')})}
+document.addEventListener('visibilitychange',function(){if(document.hidden&&WEB)saveProgress()});
 
 /* ---------- 重新開始：清掉「我自己」的資料，重新體驗第一次進來 ---------- */
 function resetAsk(){
@@ -1730,11 +1860,14 @@ var ADM={tab:'sum',msgs:[],loaded:false,confirm:null,owner:false,canMod:false};
 var MGR_KEY='xb_mgr',MGR_FAIL='xb_mgr_fail',MGR_HOURS=8;
 
 /* ---------- 管理者身分：擁有者，或輸入密碼的人 ---------- */
-function mgrFlag(){try{var o=JSON.parse(localStorage.getItem(MGR_KEY)||'null');return !!(o&&o.until>Date.now())}catch(e){return false}}
+function admTok(){try{var o=JSON.parse(localStorage.getItem('xb_admtok')||'null');return o&&o.until>Date.now()?o.t:''}catch(e){return''}}
+function admTokSet(t,hours){try{if(t)localStorage.setItem('xb_admtok',JSON.stringify({t:t,until:Date.now()+(hours||8)*3600e3-60000}));else localStorage.removeItem('xb_admtok')}catch(e){}}
+function mgrFlag(){try{var o=JSON.parse(localStorage.getItem(MGR_KEY)||'null');return !!(o&&o.until>Date.now())&&(!WEB||!!admTok())}catch(e){return false}}
 function mgrSet(on){try{if(on)localStorage.setItem(MGR_KEY,JSON.stringify({until:Date.now()+MGR_HOURS*3600e3}));else localStorage.removeItem(MGR_KEY)}catch(e){}}
 function hex2buf(h){var b=new Uint8Array(h.length/2);for(var i=0;i<b.length;i++)b[i]=parseInt(h.substr(i*2,2),16);return b}
 function buf2hex(b){return Array.prototype.map.call(new Uint8Array(b),function(x){return('0'+x.toString(16)).slice(-2)}).join('')}
 function mgrDerive(pw){
+ if(!MGR)return Promise.reject(new Error('nomgr'));
  if(!window.crypto||!crypto.subtle)return Promise.reject(new Error('nocrypto'));
  var norm=String(pw).replace(/[\s-]/g,'').toLowerCase();
  return crypto.subtle.importKey('raw',new TextEncoder().encode(norm),'PBKDF2',false,['deriveBits']).then(function(k){return crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt:hex2buf(MGR.salt),iterations:MGR.iter},k,256)}).then(buf2hex);
@@ -1756,6 +1889,16 @@ function openMgrLogin(fromChooser){
 }
 function mgrSubmit(){
  var e=$('#mgPw'),msg=$('#mgMsg');if(!e)return;
+ if(WEB){
+  if(!e.value.trim()){msg.textContent='請輸入密碼';return}
+  msg.style.color='';msg.textContent='檢查中…';
+  apiCall('adm_login',{password:e.value},'').then(function(j){admTokSet(j.token,j.hours);mgrEnter(false)}).catch(function(er){
+   var d=er.data||{};e.value='';msg.style.color='#c0392b';
+   msg.textContent=er.status===423?'輸錯太多次，請 '+d.mins+' 分鐘後再試。':er.status===401?'密碼不對'+(d.left!=null&&d.left<5?'（還有 '+d.left+' 次機會）':'')+'。':er.status===503?'伺服器還沒有設定管理者密碼，請看網站的 /status 頁面。':'連不上伺服器，請稍後再試。';
+  });
+  return;
+ }
+ if(!MGR){msg.style.color='#c0392b';msg.textContent='目前沒有連到伺服器，無法使用管理者功能。請看網站的 /status 頁面。';return}
  var lock=mgrLocked();if(lock){msg.textContent='輸錯太多次，請 '+lock+' 秒後再試。';return}
  if(!e.value.trim()){msg.textContent='請輸入密碼';return}
  msg.textContent='檢查中…';
@@ -1766,18 +1909,19 @@ function mgrSubmit(){
 }
 function mgrEnter(isOwner){
  if(!isOwner)mgrSet(true);
+ if(WEB){ADM.owner=true;ADM.canMod=true;subscribeResidents();webPoll()}
  NOCLOSE=false;closeModal();
  S.introSeen=true;S.mgrMode=true;DBX.loaded=DBX.loaded||false;
  if(!S.reg)G.busy=false;
  initAdmin();toast('🛠 已進入管理者模式');
  setTimeout(function(){openAdmin('sum')},400);
 }
-function mgrLogout(){mgrSet(false);S.mgrMode=false;var b=$('#admbtn');if(b)b.remove();closeModal();toast('已登出管理者')}
+function mgrLogout(){mgrSet(false);admTokSet('');S.mgrMode=false;var b=$('#admbtn');if(b)b.remove();closeModal();toast('已登出管理者')}
 function initAdmin(){
  if($('#admbtn'))return;
  var asMgr=mgrFlag();
  Promise.all([isOwnerNow(),DBX.user&&DBX.user.canEdit?DBX.user.canEdit().catch(function(){return false}):Promise.resolve(false)]).then(function(r){
-  ADM.owner=r[0];ADM.canMod=r[0]||r[1];
+  ADM.owner=r[0]||WEB;ADM.canMod=r[0]||r[1]||WEB;
   if(!(asMgr||S.mgrMode))return;
   if($('#admbtn'))return;
   var b=document.createElement('button');b.id='admbtn';b.type='button';b.setAttribute('aria-label','管理後台');b.textContent='🛠';
@@ -1794,6 +1938,9 @@ function admName(id){var r=DBX.residents[id];return r&&r.name?r.name:'（已移�
 function admDate(ts){if(!ts)return'—';var d=new Date(ts);function z(n){return n<10?'0'+n:n}return d.getFullYear()+'/'+z(d.getMonth()+1)+'/'+z(d.getDate())+' '+z(d.getHours())+':'+z(d.getMinutes())}
 function admDay(ts){var d=new Date(ts);return d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate()}
 function admLoadMsgs(){
+ if(WEB){
+  return apiCall('adm_list',{},admTok()).then(function(j){var m={};(j.items||[]).forEach(function(r){m[r.id]=r});DBX.residents=m;ADM.msgs=j.msgs||[];ADM.loaded=true;ADM.err=false;renderResidents();return ADM.msgs}).catch(function(e){ADM.loaded=true;ADM.err=true;if(e.status===401||e.status===403){mgrSet(false);admTokSet('');ADM.err='expired'}return ADM.msgs});
+ }
  if(!dbOn())return Promise.resolve([]);
  return DBX.db.collection('messages').orderBy('ts','desc').limit(300).get().then(function(s){ADM.msgs=s.docs.map(function(d){var o=d.data()||{};return{id:d.id,to:o.to,from:o.from,text:o.text,ts:o.ts}});ADM.loaded=true;return ADM.msgs}).catch(function(){ADM.loaded=true;return ADM.msgs});
 }
@@ -1828,7 +1975,8 @@ function admClusters(R){
 function admCount(list,key){var c={};list.forEach(function(r){(r[key]||[]).forEach(function(s){c[s]=(c[s]||0)+1})});return Object.keys(c).map(function(k){return[k,c[k]]}).sort(function(a,b){return b[1]-a[1]})}
 function admHTML(){
  var R=realResidents(),h='<div class="mh"><span class="ic">🛠</span><div><h3>管理後台</h3><small>管理者專用・共 '+R.length+' 位居民、'+ADM.msgs.length+' 則留言</small></div></div>'+admTabs();
- if(STANDALONE)h+='<p class="mp" style="color:#8a5a00">📌 這是展示版：沒有連接共享資料庫，下面是 3 位示範居民加上這部裝置上的註冊資料，用來展示後台長什麼樣子。正式使用時，這裡會是所有居民的真實資料。</p>';
+ if(WEB)h+=ADM.err==='expired'?'<p class="mp" style="color:#c0392b">⚠️ 管理者登入已經過期，請按下面「登出管理者」後重新登入。</p>':ADM.err?'<p class="mp" style="color:#c0392b">⚠️ 這次沒有讀到最新資料，請關掉後再打開。</p>':'<p class="mp" style="color:#2d7a3e">✅ 已連線到雲端資料庫：下面是所有居民的真實資料。管理者登入 8 小時後會自動登出。</p>';
+ else if(STANDALONE)h+='<p class="mp" style="color:#8a5a00">📌 這是展示版：沒有連接共享資料庫，下面是 3 位示範居民加上這部裝置上的註冊資料，用來展示後台長什麼樣子。正式使用時，這裡會是所有居民的真實資料。</p>';
  else if(!dbOn())h+='<p class="mp" style="color:#c0392b">⚠️ 目前連不到共享資料（需要登入 Claude 帳號並被分享這個頁面），下面的統計是空的。</p>';
  else if(STANDALONE){}
  else if(!ADM.owner)h+=DBX.canWrite===false?'<p class="mp">🔒 這個帳號只能看統計和匯出，不能修改資料（需要被分享為「貢獻者」以上）。</p>':'<p class="mp">🔒 這個帳號不是擁有者：可以看統計、匯出、刪除留言；「移除居民」只有擁有者能做。</p>';
@@ -1841,7 +1989,7 @@ function admHTML(){
   h+='<label>近 14 天新增居民</label><div class="admtl">'+tl.map(function(x){return'<span title="'+x[0]+'：'+x[1]+' 位"><i style="height:'+Math.round(x[1]/mx*100)+'%"></i><em>'+x[0].split('/')[1]+'</em></span>'}).join('')+'</div>';
   var CL=admClusters(R),g=CL.filter(function(c){return c.give.length}).map(function(c){return[c.label,c.give.length]}).sort(function(x,y){return y[1]-x[1]}),w=CL.filter(function(c){return c.want.length}).map(function(c){return[c.label,c.want.length]}).sort(function(x,y){return y[1]-x[1]});
   h+='<label>大家最能給的事</label>'+admBars(g.slice(0,6),g.length?g[0][1]:1)+'<label>大家最想學的事</label>'+admBars(w.slice(0,6),w.length?w[0][1]:1);
-  h+='<p class="mp">📌 只統計有寫入權限的人。用公開連結進來的一般訪客，資料只存在他們自己的手機，這裡看不到。</p>';
+  if(!WEB)h+='<p class="mp">📌 只統計有寫入權限的人。用公開連結進來的一般訪客，資料只存在他們自己的手機，這裡看不到。</p>';
  }
  if(ADM.tab==='match'){
   var CL2=admClusters(R);
@@ -1855,7 +2003,7 @@ function admHTML(){
   h+=pairs.length?'<div class="vm">'+pairs.join('')+'</div>':'<p class="mp">目前還沒有可以配對的組合。</p>';
  }
  if(ADM.tab==='res'){
-  h+=R.length?'<div class="vm tall">'+R.slice().reverse().map(function(r){var k='r'+r.id,asking=ADM.confirm===k;return'<div class="vmi"><b>'+esc(r.name||'（無名）')+'</b>'+(r.job?' <small>'+esc(r.job)+'</small>':'')+'<br><small>'+admDate(r.ts)+'・第 '+((r.slot|0)+1)+' 塊地・能給：'+esc((r.skills||[]).join('、')||'—')+'・想學：'+esc((r.wants||[]).join('、')||'—')+(r.about?'<br>✍️ '+esc(r.about):'')+'</small><br>'+(STANDALONE?'<small style="opacity:.65">（展示資料）</small>':ADM.owner?'<button type="button" class="btn ol sm" onclick="admDelRes(\''+esc(r.id)+'\')">'+(asking?'確定移除？再按一次':'移除這位居民')+'</button>':'<small style="opacity:.65">（只有擁有者能移除）</small>')+'</div>'}).join('')+'</div><p class="mp">移除後，他的房子會從所有人的村子消失。</p>':'<p class="mp">還沒有人註冊。</p>';
+  h+=R.length?'<div class="vm tall">'+R.slice().reverse().map(function(r){var k='r'+r.id,asking=ADM.confirm===k;return'<div class="vmi"><b>'+esc(r.name||'（無名）')+'</b>'+(r.job?' <small>'+esc(r.job)+'</small>':'')+'<br><small>'+admDate(r.ts)+'・第 '+((r.slot|0)+1)+' 塊地・能給：'+esc((r.skills||[]).join('、')||'—')+'・想學：'+esc((r.wants||[]).join('、')||'—')+(r.about?'<br>✍️ '+esc(r.about):'')+'</small><br>'+(STANDALONE?'<small style="opacity:.65">（展示資料）</small>':ADM.owner?(WEB?(ADM.newPin&&ADM.newPin.id===r.id?'<b style="color:#c0392b">新密碼：'+esc(ADM.newPin.pin)+'</b>（請當面告訴他，這個畫面關掉就看不到了）<br>':'')+'<button type="button" class="btn ol sm" onclick="admResetPin(\''+esc(r.id)+'\')">'+(ADM.confirm==='p'+r.id?'確定重設？再按一次':'重設密碼')+'</button> ':'')+'<button type="button" class="btn ol sm" onclick="admDelRes(\''+esc(r.id)+'\')">'+(asking?'確定移除？再按一次':'移除這位居民')+'</button>':'<small style="opacity:.65">（只有擁有者能移除）</small>')+'</div>'}).join('')+'</div><p class="mp">移除後，他的房子會從所有人的村子消失。</p>':'<p class="mp">還沒有人註冊。</p>';
  }
  if(ADM.tab==='msg'){
   h+=ADM.msgs.length?'<div class="vm tall">'+ADM.msgs.map(function(m){var k='m'+m.id,asking=ADM.confirm===k;return'<div class="vmi"><b>'+esc(admName(m.from))+'</b> → <b>'+esc(admName(m.to))+'</b>　<small>'+admDate(m.ts)+'</small><br>'+esc(m.text||'')+'<br>'+(DBX.canWrite!==false?'<button type="button" class="btn ol sm" onclick="admDelMsg(\''+esc(m.id)+'\')">'+(asking?'確定刪除？再按一次':'刪除這則')+'</button>':'')+'</div>'}).join('')+'</div>':'<p class="mp">還沒有留言。</p>';
@@ -1866,14 +2014,21 @@ function admHTML(){
  h+='<div class="mf" style="justify-content:flex-start;margin-top:10px"><button type="button" class="btn ol sm" onclick="closeModal();REG=null;NOCLOSE=false;openRegister(1)">🏠 我也想蓋自己的家</button>'+(mgrFlag()?'<button type="button" class="btn ol sm" onclick="mgrLogout()">登出管理者</button>':'')+'</div>';
  return h;
 }
+function admResetPin(id){
+ var k='p'+id;if(ADM.confirm!==k){ADM.confirm=k;modal(admHTML());return}
+ ADM.confirm=null;
+ apiCall('adm_reset_pin',{id:id},admTok()).then(function(j){ADM.newPin={id:id,pin:j.pin};modal(admHTML())}).catch(function(){toast('重設失敗，請稍後再試')});
+}
 function admDelRes(id){
  var k='r'+id;if(ADM.confirm!==k){ADM.confirm=k;modal(admHTML());return}
  ADM.confirm=null;
+ if(WEB){apiCall('adm_del_res',{id:id},admTok()).then(function(){delete DBX.residents[id];renderResidents();toast('已移除這位居民');modal(admHTML())}).catch(function(){toast('移除失敗，請再試一次')});return}
  DBX.db.doc('residents/'+id).delete().then(function(){toast('已移除這位居民');setTimeout(function(){modal(admHTML())},300)}).catch(function(){toast(ADM.owner?'移除失敗，請再試一次':'只有擁有者能移除居民')});
 }
 function admDelMsg(id){
  var k='m'+id;if(ADM.confirm!==k){ADM.confirm=k;modal(admHTML());return}
  ADM.confirm=null;
+ if(WEB){var mm=ADM.msgs.filter(function(m){return m.id===id})[0];if(!mm)return;apiCall('adm_del_msg',{to:mm.to,id:id},admTok()).then(function(){ADM.msgs=ADM.msgs.filter(function(m){return m.id!==id});toast('已刪除這則留言');modal(admHTML())}).catch(function(){toast('刪除失敗，請再試一次')});return}
  DBX.db.doc('messages/'+id).delete().then(function(){ADM.msgs=ADM.msgs.filter(function(m){return m.id!==id});toast('已刪除這則留言');modal(admHTML())}).catch(function(){toast('刪除失敗，這個帳號可能沒有寫入權限')});
 }
 function csvCell(v){var s=String(v==null?'':v);return/[",\n\r]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s}
@@ -1892,10 +2047,18 @@ function admExport(kind){
  var data=admCSV(kind),name=(kind==='res'?'巷伴居民名單':'巷伴留言')+'_'+admDay(Date.now())+'.csv';
  claudeUse('downloads').then(function(dl){
   if(dl&&dl.save){dl.save({filename:name,data:data}).then(function(){toast('已匯出：'+name)}).catch(function(){admShowCSV(data)})}
+  else if(admBlobSave(data,'xiangban-'+(kind==='res'?'residents':'messages')+'-'+admDay(Date.now()).replace(/-(\d)(?!\d)/g,'-0$1')+'.csv')){toast('已匯出，請看瀏覽器的下載項目');admShowCSV(data,true)}
   else admShowCSV(data);
  });
 }
-function admShowCSV(data){var e=$('#admcsv');if(e)e.innerHTML='<p class="mp">這裡無法直接下載，請全選下面的內容複製，貼到試算表。</p><textarea readonly rows="8" style="width:100%" onclick="this.select()">'+esc(data.replace('﻿',''))+'</textarea>'}
+function admBlobSave(data,name){
+ try{
+  var b=new Blob([data],{type:'text/csv;charset=utf-8'}),u=URL.createObjectURL(b),a=document.createElement('a');
+  a.href=u;a.download=name;a.style.display='none';document.body.appendChild(a);a.click();
+  setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(u)},4000);return true;
+ }catch(e){return false}
+}
+function admShowCSV(data,after){var e=$('#admcsv');if(e)e.innerHTML='<p class="mp">'+(after?'已經下載了。如果沒看到檔案，請檢查瀏覽器的「下載項目」，或全選下面的內容複製到試算表。':'這裡無法直接下載，請全選下面的內容複製，貼到試算表。')+'</p><textarea readonly rows="8" style="width:100%" onclick="this.select()">'+esc(data.replace('﻿',''))+'</textarea>'}
 
 /* ============ 遊戲：對話、請託、小任務、公佈欄、郵筒、涼亭、口袋 ============ */
 var $=function(s){return document.querySelector(s)};
@@ -2241,7 +2404,7 @@ function openPocket(tab){
  if(S.pt==='rank'){var R=ranks();h+='<p class="mp">以社區為範圍，用暱稱顯示。不想被看到也可以隱藏。</p><label class="sw"><input type="checkbox" '+(S.hideRank?'checked':'')+' onchange="S.hideRank=this.checked;openPocket(\'rank\')"> 不出現在榜上（只有我看得到自己的名次）</label><ol class="rank">'+R.l.map(function(x,i){return'<li class="'+(x.me?'me':'')+'"><span>'+(i+1)+'</span><b>'+esc(x.n)+'</b><em>'+x.xp+' xp</em></li>'}).join('')+'</ol>'+(S.hideRank?'<div class="say">🔒 你的名次：第 '+R.my+' 名（只有你看得到）</div>':'')}
  if(S.pt==='rule'){h+=RULES.map(function(r){return'<div class="rule"><span class="ic">'+r[0]+'</span><div><b>'+r[1]+'</b><span>'+r[2]+'</span></div></div>'}).join('')}
  if(S.pt==='flow'){var ST=['發現','建檔','發布或挑選','約定','執行','完成回饋','持續'],TX=['在據點、里幹事或家人口中聽到','建立能力名片，不方便打字的人可口述、請人代填','發布「我需要幫助」，或挑一件小事','選時間，在公共場所或線上見面','現場完成十五到三十分鐘的小事','雙方確認完成，互寫感謝卡，蓋印章','約下一次，輪到自己時也開口求助'];h+='<p class="mp">一次互助，從聽到到持續，七個階段：</p>'+ST.map(function(s,i){return'<div class="rule"><span class="ic">'+(i+1)+'</span><div><b>'+s+'</b><span>'+TX[i]+'</span></div></div>'}).join('')}
- if(S.pt==='set'){h+='<label>字的大小</label><div class="chips">'+FS_NAME.map(function(n,i){return'<button type="button" class="'+(S.fs===i?'on':'')+'" onclick="setFS('+i+');openPocket(\'set\')">'+n+'</button>'}).join('')+'</div><div class="mf" style="justify-content:flex-start"><button type="button" class="btn ol" onclick="openLook()">🪞 換造型</button><button type="button" class="btn ol" onclick="closeModal();openMgrLogin(false)">🔐 管理者入口</button><button type="button" class="btn ol" onclick="closeModal();resetAsk()">🔄 重新開始</button></div><label class="sw"><input type="checkbox" '+(S.sound?'checked':'')+' onchange="S.sound=this.checked"> 說話的聲音</label><div class="mf" style="justify-content:flex-start"><button type="button" class="btn ol" onclick="closeModal();if(window.xbIntro)window.xbIntro.open()">▶ 重看開場動畫</button><button type="button" class="btn ol" onclick="closeModal();S.introSeen=false;talk(\'mayor\')">重聽里長伯說明</button></div>'}
+ if(S.pt==='set'){h+='<label>字的大小</label><div class="chips">'+FS_NAME.map(function(n,i){return'<button type="button" class="'+(S.fs===i?'on':'')+'" onclick="setFS('+i+');openPocket(\'set\')">'+n+'</button>'}).join('')+'</div><div class="mf" style="justify-content:flex-start"><button type="button" class="btn ol" onclick="openLook()">🪞 換造型</button><button type="button" class="btn ol" onclick="closeModal();openMgrLogin(false)">🔐 管理者入口</button>'+(WEB?(dbOn()?'<button type="button" class="btn ol" onclick="pinAsk()">🔑 改密碼</button><button type="button" class="btn ol" onclick="closeModal();webLogout()">🚪 登出（換人用）</button><button type="button" class="btn ol" onclick="delAsk()">🗑 刪除我的帳號</button>':''):'<button type="button" class="btn ol" onclick="closeModal();resetAsk()">🔄 重新開始</button>')+'</div><label class="sw"><input type="checkbox" '+(S.sound?'checked':'')+' onchange="S.sound=this.checked"> 說話的聲音</label><div class="mf" style="justify-content:flex-start"><button type="button" class="btn ol" onclick="closeModal();if(window.xbIntro)window.xbIntro.open()">▶ 重看開場動畫</button><button type="button" class="btn ol" onclick="closeModal();S.introSeen=false;talk(\'mayor\')">重聽里長伯說明</button></div>'}
  modal(h);
 }
 

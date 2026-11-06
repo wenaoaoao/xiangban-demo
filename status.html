@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><title>巷伴｜系統狀態檢查</title>
+<style>
+:root{--bg:#f6f1e7;--card:#fff;--ink:#2e2a24;--mute:#7b7468;--ok:#2d7a3e;--bad:#c0392b;--warn:#b7791f;--line:#e6dfd0}
+@media(prefers-color-scheme:dark){:root{--bg:#1d1b18;--card:#2a2723;--ink:#f1ebe0;--mute:#b3aa9a;--ok:#6fcf86;--bad:#ff8a7a;--warn:#f0b955;--line:#3d3830}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,"Noto Sans TC",sans-serif}
+main{max-width:640px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:22px;margin:8px 0 2px}p.sub{color:var(--mute);margin:0 0 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin:12px 0}
+.row{display:flex;gap:10px;align-items:flex-start}.ic{font-size:22px;line-height:1.3}
+.row b{display:block}.row span{color:var(--mute);font-size:14px}
+.ok b{color:var(--ok)}.bad b{color:var(--bad)}.warn b{color:var(--warn)}
+ol{margin:8px 0 0;padding-left:22px;font-size:15px}li{margin:3px 0}code{background:var(--bg);padding:1px 6px;border-radius:6px;font-size:14px}
+button,a.btn{display:inline-block;margin-top:10px;padding:10px 16px;border:0;border-radius:10px;background:#3b7dd8;color:#fff;font:inherit;text-decoration:none;cursor:pointer}
+details{margin-top:14px;font-size:13px;color:var(--mute)}pre{white-space:pre-wrap;word-break:break-all;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px}
+</style></head><body><main>
+<h1>🏘️ 巷伴｜系統狀態檢查</h1>
+<p class="sub">這一頁會檢查網站有沒有設定好。每一項都是綠色，居民就可以註冊、管理者就可以登入。</p>
+<div id="out"><div class="card">檢查中…</div></div>
+<button onclick="run()">🔄 重新檢查</button> <a class="btn" href="/" style="background:#6b8f5e">回到網站</a>
+<details><summary>給協助的人看的技術資訊（出問題時請截圖這一段）</summary><pre id="raw"></pre></details>
+</main>
+<script>
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function item(kind,title,desc,steps){
+ var ic=kind==='ok'?'✅':kind==='warn'?'⚠️':'❌';
+ return'<div class="card '+kind+'"><div class="row"><div class="ic">'+ic+'</div><div><b>'+title+'</b><span>'+desc+'</span>'+(steps?'<ol>'+steps.map(function(s){return'<li>'+s+'</li>'}).join('')+'</ol>':'')+'</div></div></div>';
+}
+function run(){
+ var out=document.getElementById('out'),raw=document.getElementById('raw');out.innerHTML='<div class="card">檢查中…</div>';
+ fetch('/api/app?op=health',{cache:'no-store'}).then(function(r){return r.text().then(function(t){return{s:r.status,t:t}})}).then(function(r){
+  var j=null;try{j=JSON.parse(r.t)}catch(e){}
+  raw.textContent='HTTP '+r.s+'\n'+r.t.slice(0,1500);
+  var h='';
+  if(!j){
+   h+=item('bad','後端程式沒有在運作','網站的畫面有了，但找不到「資料處理程式」（HTTP '+r.s+'）。通常是 api 資料夾沒有上傳到 GitHub。',['到 GitHub 的專案，確認有 <code>api</code> 資料夾，裡面有 <code>app.js</code>；還有 <code>package.json</code>','補上傳後，Vercel 會自動重新部署，等 1 分鐘再按「重新檢查」']);
+   out.innerHTML=h;return;
+  }
+  h+=item('ok','網站與後端程式','已經在運作（版本 '+esc(j.version)+'）');
+  if(!j.storeConfigured)h+=item('bad','還沒有連接雲端儲存空間','居民的資料需要一個地方存放。',['Vercel 專案頁 → 上方 <b>Storage</b> 分頁','按 <b>Create Database</b> → 選 <b>Blob</b> →（如果有選項，選 <b>Private</b>）→ 建立','出現「Connect Project」時，選你的專案，三個環境都勾 → <b>Connect</b>','到 <b>Deployments</b> → 最新一筆右邊「⋯」→ <b>Redeploy</b>，等 1 分鐘再按「重新檢查」']);
+  else if(!j.storage||!j.storage.ok)h+=item('bad','儲存空間連不上','已經有設定，但讀寫失敗。錯誤訊息：<br><code>'+esc(j.storage&&j.storage.error||'未知')+'</code>',['請把這個畫面截圖給協助的人','如果剛剛才建立，請 Redeploy 一次再檢查']);
+  else h+=item('ok','雲端儲存空間','讀寫測試通過'+(j.storage.access==='public'?'<br>⚠️ 目前是「公開」類型的儲存空間，資料網址知道的人可以直接開。建議改建一個 Private 的 Blob。':'')+(typeof j.residents==='number'?'<br>目前有 '+j.residents+' 位居民註冊':''));
+  if(!j.adminSet)h+=item('bad','還沒設定管理者密碼','沒有密碼，管理者就進不了後台。',['Vercel 專案頁 → <b>Settings</b> → <b>Environment Variables</b>','Key 填 <code>ADMIN_PASSWORD</code>，Value 填你要的密碼，按 <b>Save</b>','到 <b>Deployments</b> → 最新一筆「⋯」→ <b>Redeploy</b>']);
+  else if(j.adminWeak)h+=item('warn','管理者密碼太簡單','密碼已設定，但太短或是常見的字，別人可能猜到。管理者能看到所有居民資料，建議改成 8 個字以上。',['Settings → Environment Variables → 編輯 <code>ADMIN_PASSWORD</code>','存檔後 Redeploy']);
+  else h+=item('ok','管理者密碼','已設定');
+  if(!j.secretOk)h+=item('bad','登入憑證金鑰沒有','連接儲存空間後會自動產生。請先完成上面的儲存空間設定。');
+  else h+=item('ok','登入憑證','正常');
+  if(j.ok)h+='<div class="card ok"><div class="row"><div class="ic">🎉</div><div><b>全部設定好了</b><span>現在可以回到網站，用「我是居民」註冊，或用「我是據點管理者」輸入密碼進後台。</span></div></div></div>';
+  out.innerHTML=h;
+ }).catch(function(e){raw.textContent=String(e);out.innerHTML=item('bad','連不上網站','請檢查網路，或稍後再試。')});
+}
+run();
+</script></body></html>
