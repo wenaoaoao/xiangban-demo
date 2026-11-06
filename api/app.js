@@ -190,6 +190,8 @@ async function wipeResident(id) {
   await update('v1/idx.json', function (d) { if (!d.items[id]) return false; delete d.items[id]; }, function () { return { v: 1, items: {} }; });
   if (a && a.data.key) await sDel('v1/nick/' + a.data.key + '.json');
   await sDel('v1/auth/' + id + '.json'); await sDel('v1/prog/' + id + '.json'); await sDel('v1/msg/' + id + '.json');
+  await update('v1/board.json', function (d) { d.items = d.items.filter(function (x) { return x.by !== id; }); d.items.forEach(function (x) { x.resp = x.resp.filter(function (r) { return r.by !== id; }); }); }, function () { return { items: [] }; }).catch(function () { });
+  await update('v1/cards.json', function (d) { d.items = d.items.filter(function (x) { return x.by !== id; }); d.items.forEach(function (x) { x.replies = x.replies.filter(function (r) { return r.by !== id; }); }); }, function () { return { items: [] }; }).catch(function () { });
 }
 function remainMin(t) { return Math.max(1, Math.ceil((t - now()) / 60000)); }
 
@@ -393,6 +395,114 @@ OPS.adm_reset_pin = async function (req, body) {
   cur.data.salt = salt; cur.data.h = await pbkdf(pin, salt); cur.data.fails = 0; cur.data.lock = 0;
   await sPut('v1/auth/' + body.id + '.json', cur.data);
   return { pin: pin };
+};
+
+
+/* ----- 公佈欄：真人互相求助與幫忙 ----- */
+var DURS = ['15 分鐘', '30 分鐘', '1 小時'], PLACES = ['社區據點', '社區公園', '線上', '住家附近（兩人同行）'];
+async function boardGet() { var c = await sGet('v1/board.json'); return c ? c.data : { items: [] }; }
+function nameOf(idx, id) { var r = idx.items[id]; return r ? r.name : '（已離開）'; }
+function boardView(it, idx, me, adm) {
+  var mine = !adm && it.by === me, o = { id: it.id, kind: it.kind, text: it.text, dur: it.dur, place: it.place, fam: !!it.fam, who: it.who || '', ts: it.ts, status: it.status, mine: mine, by: it.by, name: nameOf(idx, it.by), n: it.resp.length };
+  o.resp = it.resp.filter(function (r) { return adm || mine || r.by === me; }).map(function (r) { return { id: r.id, by: r.by, name: nameOf(idx, r.by), text: r.text, ts: r.ts, mine: r.by === me }; });
+  return o;
+}
+OPS.board_list = async function (req) {
+  var p = authOf(req), adm = p.r === 'adm', d = await boardGet(), idx = await getIdx();
+  if (p.r === 'res' && !idx.items[p.id]) throw E(401, 'gone');
+  var items = d.items.filter(function (it) { return adm || it.status === 'open' || it.by === p.id; }).slice(0, 120).map(function (it) { return boardView(it, idx, p.id, adm); });
+  return { items: items };
+};
+OPS.board_post = async function (req, body) {
+  var p = authOf(req, 'res'), idx = await getIdx(); if (!idx.items[p.id]) throw E(401, 'gone');
+  var kind = body.kind === 'offer' ? 'offer' : 'need', text = clean(body.text, 100);
+  if (text.length < 4) throw E(400, 'text');
+  var it = { id: now() + '-' + rid(4), by: p.id, kind: kind, text: text, dur: DURS.indexOf(body.dur) >= 0 ? body.dur : '30 分鐘', place: PLACES.indexOf(body.place) >= 0 ? body.place : '社區據點', fam: !!body.fam, who: body.fam ? clean(body.who, 8) : '', ts: now(), status: 'open', resp: [] };
+  var full = false;
+  await update('v1/board.json', function (d) {
+    if (d.items.filter(function (x) { return x.by === p.id && x.status === 'open'; }).length >= 5) { full = true; return false; }
+    d.items.unshift(it); if (d.items.length > 300) d.items = d.items.slice(0, 300);
+  }, function () { return { items: [] }; });
+  if (full) throw E(409, 'many');
+  return { item: boardView(it, idx, p.id, false) };
+};
+OPS.board_reply = async function (req, body) {
+  var p = authOf(req, 'res'), idx = await getIdx(); if (!idx.items[p.id]) throw E(401, 'gone');
+  var text = clean(body.text, 60), code = null; if (!text) throw E(400, 'text');
+  await update('v1/board.json', function (d) {
+    var it = d.items.filter(function (x) { return x.id === body.id; })[0];
+    if (!it) { code = 404; return false; } if (it.by === p.id) { code = 403; return false; } if (it.status !== 'open') { code = 409; return false; }
+    var mine = it.resp.filter(function (r) { return r.by === p.id; })[0];
+    if (mine) { mine.text = text; mine.ts = now(); }
+    else { if (it.resp.length >= 8) { code = 410; return false; } it.resp.push({ id: now() + '-' + rid(3), by: p.id, text: text, ts: now() }); }
+  }, function () { return { items: [] }; });
+  if (code === 404) throw E(404, 'none'); if (code === 403) throw E(403, 'own'); if (code === 409) throw E(409, 'closed'); if (code === 410) throw E(409, 'full');
+  return { ok: true };
+};
+OPS.board_close = async function (req, body) {
+  var p = authOf(req, 'res'), code = null;
+  await update('v1/board.json', function (d) {
+    var i = -1; d.items.forEach(function (x, k) { if (x.id === body.id) i = k; });
+    if (i < 0) { code = 404; return false; } if (d.items[i].by !== p.id) { code = 403; return false; }
+    if (body.remove) d.items.splice(i, 1); else d.items[i].status = 'done';
+  }, function () { return { items: [] }; });
+  if (code === 404) throw E(404, 'none'); if (code === 403) throw E(403, 'own');
+  return { ok: true };
+};
+
+/* ----- 郵筒：解憂明信片（真人回信）----- */
+async function cardsGet() { var c = await sGet('v1/cards.json'); return c ? c.data : { items: [] }; }
+function cardView(c, idx, me, adm) {
+  var mine = c.by === me;
+  return { id: c.id, text: c.text, ts: c.ts, anon: !!c.anon, mine: mine, name: (c.anon && !adm) ? '' : nameOf(idx, c.by), replies: c.replies.map(function (r) { return { id: r.id, by: r.by, name: nameOf(idx, r.by), text: r.text, ts: r.ts, mine: r.by === me }; }) };
+}
+OPS.card_list = async function (req) {
+  var p = authOf(req), adm = p.r === 'adm', d = await cardsGet(), idx = await getIdx();
+  if (p.r === 'res' && !idx.items[p.id]) throw E(401, 'gone');
+  return { items: d.items.slice(0, 60).map(function (c) { return cardView(c, idx, p.id, adm); }) };
+};
+OPS.card_post = async function (req, body) {
+  var p = authOf(req, 'res'), idx = await getIdx(); if (!idx.items[p.id]) throw E(401, 'gone');
+  var text = clean(body.text, 200); if (text.length < 2) throw E(400, 'text');
+  var c = { id: now() + '-' + rid(4), by: p.id, text: text, anon: body.anon !== false, ts: now(), replies: [] }, full = false;
+  await update('v1/cards.json', function (d) {
+    if (d.items.filter(function (x) { return x.by === p.id; }).length >= 10) { full = true; return false; }
+    d.items.unshift(c); if (d.items.length > 200) d.items = d.items.slice(0, 200);
+  }, function () { return { items: [] }; });
+  if (full) throw E(409, 'many');
+  return { item: cardView(c, idx, p.id, false) };
+};
+OPS.card_reply = async function (req, body) {
+  var p = authOf(req, 'res'), idx = await getIdx(); if (!idx.items[p.id]) throw E(401, 'gone');
+  var text = clean(body.text, 80), code = null; if (!text) throw E(400, 'text');
+  await update('v1/cards.json', function (d) {
+    var c = d.items.filter(function (x) { return x.id === body.id; })[0];
+    if (!c) { code = 404; return false; } if (c.by === p.id) { code = 403; return false; }
+    var mine = c.replies.filter(function (r) { return r.by === p.id; })[0];
+    if (mine) { mine.text = text; mine.ts = now(); } else { if (c.replies.length >= 30) { code = 410; return false; } c.replies.push({ id: now() + '-' + rid(3), by: p.id, text: text, ts: now() }); }
+  }, function () { return { items: [] }; });
+  if (code === 404) throw E(404, 'none'); if (code === 403) throw E(403, 'own'); if (code === 410) throw E(409, 'full');
+  return { ok: true };
+};
+OPS.card_del = async function (req, body) {
+  var p = authOf(req, 'res'), code = null;
+  await update('v1/cards.json', function (d) {
+    var i = -1; d.items.forEach(function (x, k) { if (x.id === body.id) i = k; });
+    if (i < 0) { code = 404; return false; } if (d.items[i].by !== p.id) { code = 403; return false; } d.items.splice(i, 1);
+  }, function () { return { items: [] }; });
+  if (code === 404) throw E(404, 'none'); if (code === 403) throw E(403, 'own');
+  return { ok: true };
+};
+/* 管理者：刪除不當內容 */
+OPS.adm_board_del = async function (req, body) {
+  authOf(req, 'adm'); var kind = body.what === 'card' ? 'cards' : 'board';
+  await update('v1/' + kind + '.json', function (d) { var n = d.items.length; d.items = d.items.filter(function (x) { return x.id !== body.id; }); if (d.items.length === n) return false; }, function () { return { items: [] }; });
+  return { ok: true };
+};
+OPS.adm_board_resp_del = async function (req, body) {
+  authOf(req, 'adm'); var kind = body.what === 'card' ? 'cards' : 'board';
+  await update('v1/' + kind + '.json', function (d) { var ch = false; d.items.forEach(function (x) { var l = kind === 'cards' ? x.replies : x.resp, n = l.length; var k = l.filter(function (r) { return r.id !== body.rid; }); if (k.length !== n) { ch = true; if (kind === 'cards') x.replies = k; else x.resp = k; } }); if (!ch) return false; }, function () { return { items: [] }; });
+  return { ok: true };
 };
 
 /* ---------- 入口 ---------- */
