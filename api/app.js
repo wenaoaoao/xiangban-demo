@@ -47,7 +47,7 @@ var MEM = {}, memSeq = 0;
 function useMem() { return process.env.XB_STORE === 'memory'; }
 var blobLib = null, ACCESS = null;
 function BL() { return blobLib || (blobLib = require('@vercel/blob')); }
-function storeReady() { return useMem() || !!process.env.BLOB_READ_WRITE_TOKEN; }
+function storeReady() { return useMem() || !!(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID); }
 
 async function detectAccess() {
   if (ACCESS) return ACCESS;
@@ -122,10 +122,21 @@ async function update(path, fn, init) {
 }
 
 /* ---------- 密碼與登入憑證 ---------- */
-function secret() {
-  if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
-  if (process.env.BLOB_READ_WRITE_TOKEN) return 'xb|' + process.env.BLOB_READ_WRITE_TOKEN;
-  if (useMem()) return 'dev-secret';
+var SECRET = null;
+function secret() { return SECRET; }
+async function ensureSecret() {
+  if (SECRET) return SECRET;
+  if (process.env.SESSION_SECRET) return (SECRET = process.env.SESSION_SECRET);
+  if (process.env.BLOB_READ_WRITE_TOKEN) return (SECRET = 'xb|' + process.env.BLOB_READ_WRITE_TOKEN);
+  if (useMem()) return (SECRET = 'dev-secret');
+  if (!storeReady()) return null;
+  /* 新版 Vercel Blob 沒有 token：第一次使用時，在私有儲存空間裡產生一把只有伺服器讀得到的隨機金鑰 */
+  for (var i = 0; i < 3; i++) {
+    var c = await sGet('v1/secret.json');
+    if (c && c.data && c.data.k) return (SECRET = 'xb2|' + c.data.k);
+    try { await sPut('v1/secret.json', { k: crypto.randomBytes(32).toString('hex') }, { create: true }); }
+    catch (e) { if (e.code !== 'exists') throw e; }
+  }
   return null;
 }
 function sign(payload) {
@@ -186,11 +197,12 @@ function remainMin(t) { return Math.max(1, Math.ceil((t - now()) / 60000)); }
 var OPS = {};
 
 OPS.health = async function (req, body, q) {
-  var out = { ok: true, version: VERSION, storeConfigured: storeReady(), adminSet: !!process.env.ADMIN_PASSWORD, secretOk: !!secret(), node: process.version };
+  var out = { ok: true, version: VERSION, storeConfigured: storeReady(), adminSet: !!process.env.ADMIN_PASSWORD, secretOk: false, node: process.version };
   var pw = normPw(process.env.ADMIN_PASSWORD || '');
   out.adminWeak = !!pw && (pw.length < 8 || pw === 'xiangban');
   out.storage = { ok: false };
-  if (!out.storeConfigured) { out.storage.error = '還沒有連接 Blob 儲存空間（找不到 BLOB_READ_WRITE_TOKEN）'; return out; }
+  out.ok = false;
+  if (!out.storeConfigured) { out.storage.error = '還沒有連接 Blob 儲存空間（找不到 BLOB_STORE_ID 或 BLOB_READ_WRITE_TOKEN）'; return out; }
   try {
     var t = 'x' + now();
     await sPut('v1/health/probe.json', { t: t });
@@ -199,6 +211,7 @@ OPS.health = async function (req, body, q) {
     var l = await sList('v1/health/'); if (l.indexOf('v1/health/probe.json') < 0) throw new Error('列表找不到剛寫入的檔案');
     await sDel('v1/health/probe.json');
     out.storage = { ok: true, access: useMem() ? 'memory' : ACCESS };
+    await ensureSecret(); out.secretOk = !!secret();
     var idx = await getIdx(); out.residents = Object.keys(idx.items).length;
   } catch (e) { out.storage = { ok: false, error: String(e && e.message || e).slice(0, 300) }; }
   out.ok = out.storage.ok && out.adminSet && out.secretOk;
@@ -406,6 +419,7 @@ async function handler(req, res) {
     if (!fn) return send(res, 404, { error: 'op' });
     if (op !== 'health' && req.method !== 'POST') return send(res, 405, { error: 'method' });
     var body = await readBody(req);
+    if (op !== 'health') { await ensureSecret(); }
     var out = await fn(req, body, q);
     send(res, 200, out);
   } catch (e) {
