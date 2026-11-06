@@ -44,6 +44,7 @@ function run(){
   if(!j.adminSet)h+=item('bad','還沒設定管理者密碼','沒有密碼，管理者就進不了後台。',['Vercel 專案頁 → <b>Settings</b> → <b>Environment Variables</b>','Key 填 <code>ADMIN_PASSWORD</code>，Value 填你要的密碼，按 <b>Save</b>','到 <b>Deployments</b> → 最新一筆「⋯」→ <b>Redeploy</b>']);
   else if(j.adminWeak)h+=item('warn','管理者密碼太簡單','密碼已設定，但太短或是常見的字，別人可能猜到。管理者能看到所有居民資料，建議改成 8 個字以上。',['Settings → Environment Variables → 編輯 <code>ADMIN_PASSWORD</code>','存檔後 Redeploy']);
   else h+=item('ok','管理者密碼','已設定');
+  if(j.storage&&j.storage.ok){if(j.condWrite===false)h+=item('warn','同時寫入保護沒有生效','多人同時註冊時，後寫的可能蓋掉先寫的。不影響一般使用，但請把這個畫面截圖給協助的人。<br><code>'+esc(j.condError||'')+'</code>');else if(j.condWrite)h+=item('ok','同時寫入保護','正常')}
   if(!j.secretOk)h+=item('bad','登入憑證金鑰沒有','連接儲存空間後會自動產生。請先完成上面的儲存空間設定。');
   else h+=item('ok','登入憑證','正常');
   if(j.ok===true&&j.storeConfigured&&j.storage&&j.storage.ok&&j.adminSet&&j.secretOk)h+='<div class="card ok"><div class="row"><div class="ic">🎉</div><div><b>全部設定好了</b><span>現在可以回到網站，用「我是居民」註冊，或用「我是據點管理者」輸入密碼進後台。</span></div></div></div>';

@@ -1384,11 +1384,14 @@ function probeWeb(){
  return new Promise(function(ok){
   if(!window.fetch||!/^https?:/.test(location.protocol)){ok(false);return}
   var done=false;function fin(v){if(!done){done=true;ok(v)}}
-  setTimeout(function(){fin(false)},5000);
-  apiCall('health',undefined,'').then(function(j){
-   if(j&&j.storage&&j.storage.ok&&j.secretOk)fin(true);
-   else{WEBWHY=(j&&j.storage&&j.storage.error)||'';fin(false)}
-  },function(){fin(false)});
+  setTimeout(function(){fin(false)},16000);
+  function once(){
+   return apiCall('ping',undefined,'').then(function(j){return j&&j.ok&&j.store},function(){
+    /* 舊版伺服器沒有 ping：改用健康檢查 */
+    return apiCall('health',undefined,'').then(function(j){if(!(j&&j.storage&&j.storage.ok&&j.secretOk))WEBWHY=(j&&j.storage&&j.storage.error)||'';return !!(j&&j.storage&&j.storage.ok&&j.secretOk)},function(){return false});
+   });
+  }
+  once().then(function(v){if(v)fin(true);else return once().then(fin)}).catch(function(){fin(false)});
  });
 }
 function webAuthFail(e){
@@ -2019,7 +2022,7 @@ function admHTML(){
  if(ADM.tab==='brd'){
   var PO=ADM.posts||[],CA=ADM.cards||[];
   h+='<p class="mp">居民貼在公佈欄的紙條與郵筒明信片。看到不當內容，按「刪除」（再按一次確認）。</p><label>公佈欄紙條（'+PO.length+'）</label>';
-  h+=PO.length?'<div class="vm tall">'+PO.map(function(p){var k='bp'+p.id,asking=ADM.confirm===k;return'<div class="vmi"><b>'+esc(p.name)+'</b> '+(p.kind==='offer'?'🤝 可以幫忙':'🙋 需要幫忙')+(p.status==='done'?' ✅ 已完成':'')+'<br>'+esc(p.text)+'<br><small>'+esc(p.dur)+'・'+esc(p.place)+'・'+admDate(p.ts)+'</small>'+p.resp.map(function(r){var k2='br'+r.id;return'<div style="margin:4px 0 0 10px;font-size:13px">↳ <b>'+esc(r.name)+'</b>：'+esc(r.text)+' <button type="button" class="btn ol sm" onclick="admBrdResp(\'post\',\''+p.id+'\',\''+r.id+'\')">'+(ADM.confirm===k2?'確定？':'刪回應')+'</button></div>'}).join('')+'<br><button type="button" class="btn ol sm" onclick="admBrdDel(\'post\',\''+p.id+'\')">'+(asking?'確定刪除？再按一次':'刪除這張')+'</button></div>'}).join('')+'</div>':'<p class="mp">還沒有紙條。</p>';
+  h+=PO.length?'<div class="vm tall">'+PO.map(function(p){var k='bp'+p.id,asking=ADM.confirm===k;return'<div class="vmi"><b>'+esc(p.name)+'</b> '+(p.kind==='offer'?'🤝 可以幫忙':'🙋 需要幫忙')+(p.status==='done'?' ✅ 已完成':'')+'<br>'+esc(p.text)+'<br><small>'+esc(p.day||'')+'・'+esc(p.period||'')+'・'+esc(p.dur)+'・'+esc(p.place)+'・'+admDate(p.ts)+'</small>'+(p.note?'<br><small>📝 '+esc(p.note)+'</small>':'')+p.resp.map(function(r){var k2='br'+r.id;return'<div style="margin:4px 0 0 10px;font-size:13px">↳ <b>'+esc(r.name)+'</b>：'+esc(r.text)+' <button type="button" class="btn ol sm" onclick="admBrdResp(\'post\',\''+p.id+'\',\''+r.id+'\')">'+(ADM.confirm===k2?'確定？':'刪回應')+'</button></div>'}).join('')+'<br><button type="button" class="btn ol sm" onclick="admBrdDel(\'post\',\''+p.id+'\')">'+(asking?'確定刪除？再按一次':'刪除這張')+'</button></div>'}).join('')+'</div>':'<p class="mp">還沒有紙條。</p>';
   h+='<label>郵筒明信片（'+CA.length+'）</label>';
   h+=CA.length?'<div class="vm tall">'+CA.map(function(c){var k='bc'+c.id,asking=ADM.confirm===k;return'<div class="vmi"><b>'+(c.anon?'匿名（實際是 '+esc(c.name)+'）':esc(c.name))+'</b><br>'+esc(c.text)+'<br><small>'+admDate(c.ts)+'</small>'+c.replies.map(function(r){var k2='br'+r.id;return'<div style="margin:4px 0 0 10px;font-size:13px">↳ <b>'+esc(r.name)+'</b>：'+esc(r.text)+' <button type="button" class="btn ol sm" onclick="admBrdResp(\'card\',\''+c.id+'\',\''+r.id+'\')">'+(ADM.confirm===k2?'確定？':'刪回信')+'</button></div>'}).join('')+'<br><button type="button" class="btn ol sm" onclick="admBrdDel(\'card\',\''+c.id+'\')">'+(asking?'確定刪除？再按一次':'刪除這張')+'</button></div>'}).join('')+'</div>':'<p class="mp">還沒有明信片。</p>';
  }
@@ -2110,7 +2113,7 @@ function wbTabs(){
 }
 function wbPostCard(p){
  var need=p.kind!=='offer',mineResp=p.resp&&p.resp[0],open=WB.open===p.id;
- var h='<div class="card"><h4>'+(need?'🙋 ':'🤝 ')+esc(p.name)+(need?' 需要幫忙':' 可以幫忙')+'</h4><p style="color:var(--ink);font-weight:700">'+esc(p.text)+'</p><p>⏱ '+esc(p.dur)+'　📍 '+esc(p.place)+'　'+wbAgo(p.ts)+(p.n?'　💬 '+p.n+' 位回應':'')+'</p>';
+ var h='<div class="card"><h4>'+(need?'🙋 ':'🤝 ')+esc(p.name)+(need?' 需要幫忙':' 可以幫忙')+'</h4><p style="color:var(--ink);font-weight:700">'+esc(p.text)+'</p><p>📅 '+esc(p.day||'日期不限')+'・'+esc(p.period||'都可以')+'　⏱ '+esc(p.dur)+'　📍 '+esc(p.place)+'</p>'+(p.note?'<p>📝 '+esc(p.note)+'</p>':'')+'<p>'+wbAgo(p.ts)+(p.n?'　💬 '+p.n+' 位回應':'')+'</p>';
  if(mineResp&&!open)h+='<p>你的回應：「'+esc(mineResp.text)+'」</p>';
  if(open)h+='<input id="wbIn" maxlength="60" placeholder="'+(need?'例如：我週三下午可以，在據點見':'例如：想請你教我，週末方便嗎？')+'" value="'+esc(mineResp?mineResp.text:'')+'" onkeydown="if(event.key===\'Enter\')wbReply(\''+p.id+'\')"><div class="mf"><button type="button" class="btn ol sm" onclick="WB.open=null;wbBoardRender()">取消</button><button type="button" class="btn sm" onclick="wbReply(\''+p.id+'\')">送出</button></div><small class="mp">首次見面，請選公共場所或兩人同行。</small>';
  else h+='<div class="mf" style="justify-content:flex-start"><button type="button" class="btn sm" onclick="WB.open=\''+p.id+'\';wbBoardRender()">'+(mineResp?'修改我的回應':(need?'🙋 我可以幫忙':'🤝 我想請你幫忙'))+'</button></div>';
@@ -2133,7 +2136,7 @@ function wbBoardRender(){
   var mine=list.filter(function(p){return p.mine});
   h+=mine.length?mine.map(function(p){
    var need=p.kind!=='offer',st=p.status==='done'?'✅ 已完成':(p.resp.length?'💬 '+p.resp.length+' 位回應':'⏳ 等待回應');
-   var x='<div class="card"><h4>'+(need?'🙋 我需要幫忙':'🤝 我可以幫忙')+(p.fam?'（替 '+esc(p.who)+'）':'')+'</h4><p style="color:var(--ink);font-weight:700">'+esc(p.text)+'</p><p>⏱ '+esc(p.dur)+'　📍 '+esc(p.place)+'　'+st+'</p>';
+   var x='<div class="card"><h4>'+(need?'🙋 我需要幫忙':'🤝 我可以幫忙')+(p.fam?'（替 '+esc(p.who)+'）':'')+'</h4><p style="color:var(--ink);font-weight:700">'+esc(p.text)+'</p><p>📅 '+esc(p.day||'日期不限')+'・'+esc(p.period||'都可以')+'　⏱ '+esc(p.dur)+'　📍 '+esc(p.place)+'　'+st+'</p>'+(p.note?'<p>📝 '+esc(p.note)+'</p>':'');
    x+=p.resp.map(function(r){return'<div class="vmi"><b>'+esc(r.name)+'</b>：'+esc(r.text)+'<br><small>'+wbAgo(r.ts)+'</small></div>'}).join('');
    if(p.resp.length)x+='<p class="mp">約好時間、地點，直接在公共場所碰面就好。事情完成後，按下面的按鈕。</p>';
    x+='<div class="mf" style="justify-content:flex-start">'+(p.status==='open'?'<button type="button" class="btn sm" onclick="wbClose(\''+p.id+'\',false)">✅ 事情完成了</button>':'')+'<button type="button" class="btn ol sm" onclick="wbClose(\''+p.id+'\',true)">撤下</button></div></div>';return x}).join(''):'<p class="mp">你還沒有發布。有需要的時候開口求助，有能力的時候舉手幫忙，都是在互助。</p>';
@@ -2151,9 +2154,9 @@ function wbClose(id,remove){
 }
 function wbPublish(){
  if(WB.busy)return;WB.busy=true;
- apiCall('board_post',{kind:PS.kind,text:PS.text,dur:PS.dur,place:PS.place,fam:PS.fam,who:PS.who}).then(function(){
+ apiCall('board_post',{kind:PS.kind,text:PS.text,dur:PS.dur,place:curPlace(),day:PS.day,period:PS.period,note:PS.note,fam:PS.fam,who:PS.who}).then(function(){
   WB.busy=false;if(PS.fam&&!S.famName)S.famName=PS.who.trim();S.posts.push({text:PS.text});refreshBoard();gain(10,{});
-  toast(PS.kind==='offer'?'📌 已經貼上去了，等鄰居來找你':'📌 已釘上公佈欄：勇敢開口，也是在互助');PS.text='';PS.step=0;S.bt='mine';WB.posts=null;openBoard();
+  toast(PS.kind==='offer'?'📌 已經貼上去了，等鄰居來找你':'📌 已釘上公佈欄：勇敢開口，也是在互助');PS.text='';PS.note='';PS.step=0;S.bt='mine';WB.posts=null;openBoard();
  }).catch(function(e){WB.busy=false;wbFail(e)});
 }
 
@@ -2581,13 +2584,18 @@ function openBoard(){
 }
 function goNpc(k){closeModal();var n=NPCS[k];toast('往 '+n.name+' 走過去');walkTo(n.stand[0],n.stand[1],function(){talk(k)})}
 var TPLO=[['📱 教手機／電腦','我可以教人用手機、LINE 或電腦'],['🧵 縫補小物','我可以幫忙縫補衣服、釦子'],['🌳 陪伴一小段','我可以陪人走一段路、聊一聊'],['🍳 教一件事','我可以教一件事：'],['🔧 簡單修理','我可以幫忙簡單修理小東西']];
-var PS={kind:'need',step:0,fam:false,who:'',agree:false,text:'',dur:'30 分鐘',place:'社區據點',lv:1};
+/* 發布表單的選項 */
+var PDAYS=['今天','明天','這週內','週末','日期不限'],PPERIODS=['上午','下午','晚上','都可以'],PDURS=['15 分鐘','30 分鐘','1 小時','2 小時','半天'],PPLACES=['社區據點','社區公園','里辦公處／活動中心','圖書館','市場附近','線上（視訊或電話）','住家附近（兩人同行）','其他'];
+function curPlace(){return PS.place==='其他'?((PS.placeOther||'').trim()||'其他'):PS.place}
+function curWhen(){return (PS.day||'日期不限')+'・'+(PS.period||'都可以')}
+function chipRow(label,key,list){return'<b>'+label+'</b><div class="chips">'+list.map(function(t){return'<button type="button" class="'+(PS[key]===t?'on':'')+'" onclick="PS.'+key+'=\''+t+'\';openBoard()">'+t+'</button>'}).join('')+'</div>'}
+var PS={kind:'need',step:0,fam:false,who:'',agree:false,text:'',dur:'30 分鐘',place:'社區據點',placeOther:'',day:'日期不限',period:'都可以',note:'',lv:1};
 function postHTML(){
  var dots='<div class="dots">'+[0,1,2,3].map(function(i){return'<i class="'+(PS.step>=i?'on':'')+'"></i>'}).join('')+'</div>',b='';
  if(PS.step===0)b=(WEB?'<p class="mp">你想貼哪一種紙條？</p><div class="opt2"><button type="button" class="opt '+(PS.kind!=='offer'?'on':'')+'" onclick="PS.kind=\'need\';PS.fam=PS.fam;openBoard()"><b>🙋 我需要幫忙</b><small>請鄰居來幫我</small></button><button type="button" class="opt '+(PS.kind==='offer'?'on':'')+'" onclick="PS.kind=\'offer\';PS.fam=false;openBoard()"><b>🤝 我可以幫忙</b><small>告訴大家我能做什麼</small></button></div>':'')+'<p class="mp">'+(PS.kind==='offer'?'這是你自己的紙條':'這次是為誰發布？')+'</p>'+(PS.kind==='offer'?'':'<div class="opt2"><button type="button" class="opt '+(!PS.fam?'on':'')+'" onclick="PS.fam=false;openBoard()"><b>🙋 為自己</b><small>你自己需要的幫忙</small></button><button type="button" class="opt '+(PS.fam?'on':'')+'" onclick="PS.fam=true;if(S.famName){PS.who=S.famName;PS.agree=true}openBoard()"><b>👨‍👩‍👧 替一位家人</b><small>家人不用來、不用當志工</small></button></div>')+(PS.fam&&PS.kind!=='offer'?'<div class="fam"><label for="pWho">家人的稱呼</label><input id="pWho" '+(S.famName?'readonly':'')+' value="'+esc(PS.who)+'" placeholder="例如：媽媽" oninput="PS.who=this.value;pOk()"><label class="ck2" style="margin-top:10px"><input type="checkbox" id="pAg" '+(PS.agree?'checked':'')+' onchange="PS.agree=this.checked;pOk()"> 我已告知這位家人，並取得同意</label><small>每個人可替「一位」家人發布'+(S.famName?'（已綁定：'+esc(S.famName)+'）':'')+'。</small></div>':'')+'<div class="mf"><button type="button" class="btn" id="pN0" onclick="PS.step=1;openBoard()">下一步</button></div>';
  if(PS.step===1)b='<p class="mp">'+(PS.kind==='offer'?'你可以幫什麼忙？選個範本，或自己寫。':'需要什麼幫忙？選個範本，或自己寫。')+'</p><div class="chips">'+(PS.kind==='offer'?TPLO:TPL).map(function(t,i){return'<button type="button" onclick="pTpl('+i+')">'+t[0]+'</button>'}).join('')+'</div><textarea id="pTx" rows="3" placeholder="'+(PS.kind==='offer'?'例如：我可以教人用 LINE 視訊':'例如：想請人教我設定手機視訊')+'" oninput="pIn(this.value)">'+esc(PS.text)+'</textarea><div id="pSc"></div><div class="mf"><button type="button" class="btn ol" onclick="PS.step=0;openBoard()">上一步</button><button type="button" class="btn" id="pN1" disabled onclick="PS.step=2;openBoard()">下一步</button></div>';
- if(PS.step===2)b='<p class="mp">需要多久、在哪裡？</p><b>時間長度</b><div class="chips">'+['15 分鐘','30 分鐘','1 小時'].map(function(t){return'<button type="button" class="'+(PS.dur===t?'on':'')+'" onclick="PS.dur=\''+t+'\';openBoard()">'+t+'</button>'}).join('')+'</div><b>地點</b><div class="chips">'+['社區據點','社區公園','線上','住家附近（兩人同行）'].map(function(t){return'<button type="button" class="'+(PS.place===t?'on':'')+'" onclick="PS.place=\''+t+'\';openBoard()">'+t+'</button>'}).join('')+'</div><small class="mp">首次見面，都會提醒雙方選擇公共場所或兩人同行。</small><div class="mf"><button type="button" class="btn ol" onclick="PS.step=1;openBoard()">上一步</button><button type="button" class="btn" onclick="PS.step=3;openBoard()">下一步</button></div>';
- if(PS.step===3)b='<p class="mp">確認一下，這張紙條會釘上公佈欄：</p><div class="card"><h4>'+(PS.kind==='offer'?'🤝 我可以幫忙':PS.fam?'👨‍👩‍👧 替'+esc(PS.who)+'發布':'🙋 我發布')+'</h4><p>'+esc(PS.text)+'</p><p>⏱ '+PS.dur+'　📍 '+esc(PS.place)+'</p></div><div class="mf"><button type="button" class="btn ol" onclick="PS.step=2;openBoard()">上一步</button><button type="button" class="btn pk" onclick="pPublish()">釘上去</button></div>';
+ if(PS.step===2)b='<p class="mp">什麼時候、需要多久、在哪裡？</p>'+chipRow('哪一天','day',PDAYS)+chipRow('時段','period',PPERIODS)+chipRow('需要多久','dur',PDURS)+chipRow('地點','place',PPLACES)+(PS.place==='其他'?'<input id="pPl" maxlength="14" placeholder="例如：公車站、學校門口" value="'+esc(PS.placeOther||'')+'" oninput="PS.placeOther=this.value">':'')+'<label for="pNote">補充說明（選填）</label><input id="pNote" maxlength="40" value="'+esc(PS.note||'')+'" placeholder="例如：我腿比較不方便，請慢慢走" oninput="PS.note=this.value"><small class="mp">首次見面，都會提醒雙方選擇公共場所或兩人同行。</small><div class="mf"><button type="button" class="btn ol" onclick="PS.step=1;openBoard()">上一步</button><button type="button" class="btn" onclick="PS.step=3;openBoard()">下一步</button></div>';
+ if(PS.step===3)b='<p class="mp">確認一下，這張紙條會釘上公佈欄：</p><div class="card"><h4>'+(PS.kind==='offer'?'🤝 我可以幫忙':PS.fam?'👨‍👩‍👧 替'+esc(PS.who)+'發布':'🙋 我發布')+'</h4><p>'+esc(PS.text)+'</p><p>📅 '+esc(curWhen())+'　⏱ '+PS.dur+'　📍 '+esc(curPlace())+'</p>'+(PS.note?'<p>📝 '+esc(PS.note)+'</p>':'')+'</div><div class="mf"><button type="button" class="btn ol" onclick="PS.step=2;openBoard()">上一步</button><button type="button" class="btn pk" onclick="pPublish()">釘上去</button></div>';
  return dots+b;
 }
 function postInit(){if(PS.step===0)pOk();if(PS.step===1)pIn(PS.text)}
@@ -2597,8 +2605,8 @@ function pIn(v){PS.text=v;var r=scopeCheck(v),box=$('#pSc'),nb=$('#pN1');if(!box
 function pPublish(){
  if(WEB&&wbOn()){wbPublish();return}
  if(PS.fam&&!S.famName)S.famName=PS.who.trim();
- var post={text:PS.text,dur:PS.dur,place:PS.place,fam:PS.fam,who:PS.who};S.posts.push(post);refreshBoard();closeModal();
- gain(10,{});toast('📌 已釘上公佈欄：勇敢開口，也是在互助');PS.text='';PS.step=0;
+ var post={text:PS.text,dur:PS.dur,place:curPlace(),fam:PS.fam,who:PS.who};S.posts.push(post);refreshBoard();closeModal();
+ gain(10,{});toast('📌 已釘上公佈欄：勇敢開口，也是在互助');PS.text='';PS.note='';PS.step=0;
  setTimeout(function(){helperVisit(post)},3200);
 }
 /* 小琪看到紙條，走過來幫忙 */
