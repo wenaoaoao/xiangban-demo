@@ -38,15 +38,15 @@ function run(){
    out.innerHTML=h;return;
   }
   h+=item('ok','網站與後端程式','已經在運作（版本 '+esc(j.version)+'）');
-  if(!j.storeConfigured)h+=item('bad','還沒有連接雲端儲存空間','居民的資料需要一個地方存放。',['Vercel 專案頁 → 上方 <b>Storage</b> 分頁','按 <b>Create Database</b> → 選 <b>Blob</b> →（如果有選項，選 <b>Private</b>）→ 建立','出現「Connect Project」時，選你的專案，三個環境都勾 → <b>Connect</b>','到 <b>Deployments</b> → 最新一筆右邊「⋯」→ <b>Redeploy</b>，等 1 分鐘再按「重新檢查」']);
-  else if(!j.storage||!j.storage.ok)h+=item('bad','儲存空間連不上','已經有設定，但讀寫失敗。錯誤訊息：<br><code>'+esc(j.storage&&j.storage.error||'未知')+'</code>',['請把這個畫面截圖給協助的人','如果剛剛才建立，請 Redeploy 一次再檢查']);
+  if(!j.storeConfigured)h+=item('bad','還沒有連接雲端儲存空間','居民的資料需要一個地方存放。',['Vercel 專案頁 → 左邊側邊欄找 <b>Storage</b>（可能在 <b>Connect</b> 裡面，或用最上面的 <b>Find</b> 搜尋 Storage）','按 <b>Create Database</b> → 選 <b>Blob</b> →（如果有選項，選 <b>Private</b>）→ 建立','出現「Connect Project」時，選你的專案，三個環境都勾 → <b>Connect</b>','到 <b>Deployments</b> → 最新一筆右邊「⋯」→ <b>Redeploy</b>，等 1 分鐘再按「重新檢查」']);
+  else if(!j.storage||!j.storage.ok)h+=item('bad','儲存空間連不上','已經有設定，但讀寫失敗。若錯誤寫著「找不到 BLOB_READ_WRITE_TOKEN」，代表 api/app.js 還是舊版。錯誤訊息：<br><code>'+esc(j.storage&&j.storage.error||'未知')+'</code>',['請把這個畫面截圖給協助的人','如果剛剛才建立，請 Redeploy 一次再檢查']);
   else h+=item('ok','雲端儲存空間','讀寫測試通過'+(j.storage.access==='public'?'<br>⚠️ 目前是「公開」類型的儲存空間，資料網址知道的人可以直接開。建議改建一個 Private 的 Blob。':'')+(typeof j.residents==='number'?'<br>目前有 '+j.residents+' 位居民註冊':''));
   if(!j.adminSet)h+=item('bad','還沒設定管理者密碼','沒有密碼，管理者就進不了後台。',['Vercel 專案頁 → <b>Settings</b> → <b>Environment Variables</b>','Key 填 <code>ADMIN_PASSWORD</code>，Value 填你要的密碼，按 <b>Save</b>','到 <b>Deployments</b> → 最新一筆「⋯」→ <b>Redeploy</b>']);
   else if(j.adminWeak)h+=item('warn','管理者密碼太簡單','密碼已設定，但太短或是常見的字，別人可能猜到。管理者能看到所有居民資料，建議改成 8 個字以上。',['Settings → Environment Variables → 編輯 <code>ADMIN_PASSWORD</code>','存檔後 Redeploy']);
   else h+=item('ok','管理者密碼','已設定');
   if(!j.secretOk)h+=item('bad','登入憑證金鑰沒有','連接儲存空間後會自動產生。請先完成上面的儲存空間設定。');
   else h+=item('ok','登入憑證','正常');
-  if(j.ok)h+='<div class="card ok"><div class="row"><div class="ic">🎉</div><div><b>全部設定好了</b><span>現在可以回到網站，用「我是居民」註冊，或用「我是據點管理者」輸入密碼進後台。</span></div></div></div>';
+  if(j.ok===true&&j.storeConfigured&&j.storage&&j.storage.ok&&j.adminSet&&j.secretOk)h+='<div class="card ok"><div class="row"><div class="ic">🎉</div><div><b>全部設定好了</b><span>現在可以回到網站，用「我是居民」註冊，或用「我是據點管理者」輸入密碼進後台。</span></div></div></div>';
   out.innerHTML=h;
  }).catch(function(e){raw.textContent=String(e);out.innerHTML=item('bad','連不上網站','請檢查網路，或稍後再試。')});
 }
