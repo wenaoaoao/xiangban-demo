@@ -63,12 +63,14 @@ async function detectAccess() {
 async function sGet(p) {
   if (!storeReady()) throw E(503, 'nostore');
   if (useMem()) { var m = MEM[p]; return m ? { data: JSON.parse(m.s), etag: m.e } : null; }
-  var acc = await detectAccess(), r;
+  var acc = await detectAccess(), r, et = null;
+  try { var h = await BL().head(p); et = h && h.etag || null; }
+  catch (e) { if (/not.?found|404|does not exist/i.test(String(e && (e.name + ' ' + e.message)))) return null; et = null; }
   try { r = await BL().get(p, { access: acc, useCache: false }); }
-  catch (e) { if (/not.?found|404/i.test(String(e && (e.name + ' ' + e.message)))) return null; throw e; }
+  catch (e) { if (/not.?found|404|does not exist/i.test(String(e && (e.name + ' ' + e.message)))) return null; throw e; }
   if (!r || !r.stream) return null;
   var txt = await new Response(r.stream).text();
-  return { data: JSON.parse(txt), etag: r.blob && r.blob.etag };
+  return { data: JSON.parse(txt), etag: et || (r.blob && r.blob.etag) };
 }
 async function sPut(p, data, opt) {
   opt = opt || {};
@@ -86,7 +88,7 @@ async function sPut(p, data, opt) {
   try { var r = await BL().put(p, s, o); return r && r.etag; }
   catch (err) {
     var t = String(err && (err.name + ' ' + err.message));
-    if (/PreconditionFailed/i.test(t)) throw E(409, 'conflict');
+    if (/precondition\s*failed|etag mismatch/i.test(t)) throw E(409, 'conflict');
     if (/already exists/i.test(t)) throw E(409, 'exists');
     throw err;
   }
@@ -109,13 +111,17 @@ async function sList(prefix) {
   }
   return out.sort();
 }
+var FALLBACKS = 0;
 /* 讀-改-寫（用 etag 避免兩個人同時寫時互相蓋掉）*/
 async function update(path, fn, init) {
   for (var i = 0; i < 8; i++) {
     var cur = await sGet(path), data = cur ? cur.data : init();
     var r = await fn(data);
     if (r === false) return false;
-    try { await sPut(path, data, cur ? { ifMatch: cur.etag } : { create: true }); return true; }
+    try {
+      if (cur && i >= 5) { FALLBACKS++; await sPut(path, data, {}); return true; }
+      await sPut(path, data, cur ? { ifMatch: cur.etag } : { create: true }); return true;
+    }
     catch (e) { if (e.code !== 'conflict' && e.code !== 'exists') throw e; await sleep(30 + Math.random() * 120); }
   }
   throw E(503, 'busy');
@@ -213,12 +219,20 @@ OPS.health = async function (req, body, q) {
     var l = await sList('v1/health/'); if (l.indexOf('v1/health/probe.json') < 0) throw new Error('列表找不到剛寫入的檔案');
     await sDel('v1/health/probe.json');
     out.storage = { ok: true, access: useMem() ? 'memory' : ACCESS };
+    try {
+      await sPut('v1/health/probe2.json', { t: t });
+      var g1 = await sGet('v1/health/probe2.json'); await sPut('v1/health/probe2.json', { t: t, c: 1 }, { ifMatch: g1.etag });
+      var g2 = await sGet('v1/health/probe2.json'); out.condWrite = !!(g2 && g2.data.c === 1); await sDel('v1/health/probe2.json');
+    } catch (e) { out.condWrite = false; out.condError = String(e && e.message || e).slice(0, 160); }
+    out.fallbacks = FALLBACKS;
     await ensureSecret(); out.secretOk = !!secret();
     var idx = await getIdx(); out.residents = Object.keys(idx.items).length;
   } catch (e) { out.storage = { ok: false, error: String(e && e.message || e).slice(0, 300) }; }
   out.ok = out.storage.ok && out.adminSet && out.secretOk;
   return out;
 };
+
+OPS.ping = async function () { return { ok: true, store: storeReady(), admin: !!process.env.ADMIN_PASSWORD }; };
 
 OPS.nick = async function (req, body) {
   var name = clean(body.name, 12); if (!name) throw E(400, 'name');
@@ -399,11 +413,11 @@ OPS.adm_reset_pin = async function (req, body) {
 
 
 /* ----- 公佈欄：真人互相求助與幫忙 ----- */
-var DURS = ['15 分鐘', '30 分鐘', '1 小時'], PLACES = ['社區據點', '社區公園', '線上', '住家附近（兩人同行）'];
+var DURS = ['15 分鐘', '30 分鐘', '1 小時', '2 小時', '半天'], DAYS = ['今天', '明天', '這週內', '週末', '日期不限'], PERIODS = ['上午', '下午', '晚上', '都可以'];
 async function boardGet() { var c = await sGet('v1/board.json'); return c ? c.data : { items: [] }; }
 function nameOf(idx, id) { var r = idx.items[id]; return r ? r.name : '（已離開）'; }
 function boardView(it, idx, me, adm) {
-  var mine = !adm && it.by === me, o = { id: it.id, kind: it.kind, text: it.text, dur: it.dur, place: it.place, fam: !!it.fam, who: it.who || '', ts: it.ts, status: it.status, mine: mine, by: it.by, name: nameOf(idx, it.by), n: it.resp.length };
+  var mine = !adm && it.by === me, o = { id: it.id, kind: it.kind, text: it.text, dur: it.dur, place: it.place, day: it.day || '日期不限', period: it.period || '都可以', note: it.note || '', fam: !!it.fam, who: it.who || '', ts: it.ts, status: it.status, mine: mine, by: it.by, name: nameOf(idx, it.by), n: it.resp.length };
   o.resp = it.resp.filter(function (r) { return adm || mine || r.by === me; }).map(function (r) { return { id: r.id, by: r.by, name: nameOf(idx, r.by), text: r.text, ts: r.ts, mine: r.by === me }; });
   return o;
 }
@@ -417,7 +431,7 @@ OPS.board_post = async function (req, body) {
   var p = authOf(req, 'res'), idx = await getIdx(); if (!idx.items[p.id]) throw E(401, 'gone');
   var kind = body.kind === 'offer' ? 'offer' : 'need', text = clean(body.text, 100);
   if (text.length < 4) throw E(400, 'text');
-  var it = { id: now() + '-' + rid(4), by: p.id, kind: kind, text: text, dur: DURS.indexOf(body.dur) >= 0 ? body.dur : '30 分鐘', place: PLACES.indexOf(body.place) >= 0 ? body.place : '社區據點', fam: !!body.fam, who: body.fam ? clean(body.who, 8) : '', ts: now(), status: 'open', resp: [] };
+  var it = { id: now() + '-' + rid(4), by: p.id, kind: kind, text: text, dur: DURS.indexOf(body.dur) >= 0 ? body.dur : '30 分鐘', place: clean(body.place, 14) || '社區據點', day: DAYS.indexOf(body.day) >= 0 ? body.day : '日期不限', period: PERIODS.indexOf(body.period) >= 0 ? body.period : '都可以', note: clean(body.note, 40), fam: !!body.fam, who: body.fam ? clean(body.who, 8) : '', ts: now(), status: 'open', resp: [] };
   var full = false;
   await update('v1/board.json', function (d) {
     if (d.items.filter(function (x) { return x.by === p.id && x.status === 'open'; }).length >= 5) { full = true; return false; }
@@ -527,9 +541,9 @@ async function handler(req, res) {
     var q = req.query; if (!q) { try { q = Object.fromEntries(new URL(req.url, 'http://x').searchParams); } catch (e) { q = {}; } }
     var op = String(q.op || ''), fn = OPS[op];
     if (!fn) return send(res, 404, { error: 'op' });
-    if (op !== 'health' && req.method !== 'POST') return send(res, 405, { error: 'method' });
+    if (op !== 'health' && op !== 'ping' && req.method !== 'POST') return send(res, 405, { error: 'method' });
     var body = await readBody(req);
-    if (op !== 'health') { await ensureSecret(); }
+    if (op !== 'health' && op !== 'ping') { await ensureSecret(); }
     var out = await fn(req, body, q);
     send(res, 200, out);
   } catch (e) {
